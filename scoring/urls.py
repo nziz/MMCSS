@@ -10,44 +10,12 @@ from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 from . import views
 
 urlpatterns = [
-    path('auth/register/',          views.ApplicantRegisterView.as_view(),   name='register'),
-    path('applicant/my-scores/',    views.ApplicantOwnScoresView.as_view(),  name='my_scores'),
-    path('applicant/my-profile/',   views.ApplicantProfileView.as_view(),    name='my_profile'),
-
     # ── Authentication ─────────────────────────────────
-    path('auth/login/',   TokenObtainPairView.as_view(),  name='login'),
-    path('auth/refresh/', TokenRefreshView.as_view(),     name='token_refresh'),
+    path('auth/login/',   TokenObtainPairView.as_view(),   name='login'),
+    path('auth/refresh/', TokenRefreshView.as_view(),      name='token_refresh'),
     path('auth/profile/', views.UserProfileView.as_view(), name='profile'),
-    # ── OTP ────────────────────────────────────────────
-    path('auth/request-otp/', views.RequestOTPView.as_view(),  name='request_otp'),
-    path('auth/verify-otp/',  views.VerifyOTPView.as_view(),   name='verify_otp'),
-    path('auth/resend-otp/',  views.ResendOTPView.as_view(),   name='resend_otp'),
-    path('users/',               views.UserListView.as_view(),   name='user_list'),
-    path('users/<int:user_id>/', views.UserDetailView.as_view(), name='user_detail'),
-    # ── Applicant Registration ──────────────────────────
-    path('applicant/register/',         views.ApplicantRegisterView.as_view(),        name='applicant_register'),
-    path('applicant/verify/',           views.VerifyRegistrationOTPView.as_view(),    name='applicant_verify'),
-
-    # ── Applicant Portal ────────────────────────────────
-    path('applicant/portal/',           views.ApplicantPortalView.as_view(),          name='applicant_portal'),
-    path('applicant/upload/',           views.ApplicantUploadView.as_view(),          name='applicant_upload'),
-    path('applicant/profile/',          views.ApplicantProfileUpdateView.as_view(),   name='applicant_profile'),
 
     # ── Scoring ────────────────────────────────────────
-    path('score/individual/', views.ScoreIndividualView.as_view(),  name='score_individual'),
-    path('score/batch/',      views.ScoreBatchView.as_view(),       name='score_batch'),
-
-    # ── Records ────────────────────────────────────────
-    path('scores/',                          views.ScoreHistoryView.as_view(),    name='score_history'),
-    path('scores/<int:score_id>/',           views.ScoreDetailView.as_view(),     name='score_detail'),
-    path('applicants/<str:applicant_ref>/',  views.ApplicantHistoryView.as_view(), name='applicant_history'),
-
-    # ── Dashboard ──────────────────────────────────────
-    path('dashboard/stats/', views.DashboardStatsView.as_view(), name='dashboard_stats'),
-
-    # ── Admin ──────────────────────────────────────────
-    path('rules/',               views.ScoringRulesView.as_view(),    name='rules_list'),
-    path('rules/<int:rule_id>/', views.ScoringRulesView.as_view(),    name='rules_update'),
-    path('batches/',             views.BatchSessionListView.as_view(), name='batch_list'),
-    path('institutions/',        views.InstitutionListView.as_view(),  name='institution_list'),
+    path('score/individual/', views.ScoreIndividualView.as_view(), name='score_individual'),
+    path('score/batch/',      views.ScoreBatchView.as_view(),      name='score_batch'),
 ]
