@@ -18,31 +18,28 @@ from rest_framework import status
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.parsers import MultiPartParser, FormParser
 
-from .models import (
-    Applicant, ScoreRecord, BatchSession,
-    Institution, ScoringRule, User
-)
+from .models import Applicant, ScoreRecord, BatchSession, Institution, ScoringRule, User
 from .engine import CreditScoringEngine
 from .ingestion import extract_indicators, extract_indicators_batch, DataIngestionError
-from .serializers import (
-    ScoreRecordSerializer, ApplicantSerializer,
-    BatchSessionSerializer, InstitutionSerializer,
-    ScoringRuleSerializer, UserSerializer
-)
+from .serializers import ScoreRecordSerializer, ApplicantSerializer, BatchSessionSerializer, InstitutionSerializer, ScoringRuleSerializer, UserSerializer
 
 
-# ─── MOMO STRATEGY ADAPTER FUNCTIONS ─────────────────────────────────────────
+# ─── FIXED ENCODING MOMO STRATEGY ADAPTER ────────────────────────────────────
 def convert_momo_file_to_clean_json(file_path):
     """
-    Checks if a temporary file is an MTN MoMo statement. If it is, 
-    it normalizes the structure into a clean JSON layout string.
-    Returns None if the file is a standard legacy file format.
+    Parses structural MoMo statement formats while safely adapting to complex 
+    byte encodings (handling byte-order marks and special string characters).
     """
     try:
-        with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
-            content = f.read()
+        # Step 1: Attempt reading with utf-8-sig to clear out byte-order artifacts
+        try:
+            with open(file_path, 'r', encoding='utf-8-sig') as f:
+                content = f.read()
+        except UnicodeDecodeError:
+            # Fallback to latin-1 to safely absorb Windows-1252/ISO bytes without crashing
+            with open(file_path, 'r', encoding='latin-1') as f:
+                content = f.read()
 
-        # If it doesn't look like an MTN MoMo statement, skip entirely
         if "Momo Statement" not in content and "Transaction Id" not in content:
             return None
 
@@ -68,7 +65,7 @@ def convert_momo_file_to_clean_json(file_path):
                 continue
 
             try:
-                # Safe column extraction and index cleansing
+                # Coordinate matching for target currency numbers
                 amount_str = clean_row.replace(',', '') if len(clean_row) > 6 else '0'
                 fee_str = clean_row.replace(',', '') if len(clean_row) > 7 else '0'
                 balance_str = clean_row.replace(',', '') if len(clean_row) > 8 else '0'
@@ -90,29 +87,27 @@ def convert_momo_file_to_clean_json(file_path):
         return json.dumps({"transactions": normalized_txs}, indent=2)
     except Exception:
         return None
+
+
 # ─── PERMISSION HELPERS ───────────────────────────────────────────────────────
 def is_admin(user):
-    return user.role == 'admin'
+    return getattr(user, 'role', '') == 'admin'
 
 def is_loan_officer(user):
-    return user.role in ['admin', 'loan_officer']
+    return getattr(user, 'role', '') in ['admin', 'loan_officer']
 
 def is_branch_manager(user):
-    return user.role in ['admin', 'branch_manager']
+    return getattr(user, 'role', '') in ['admin', 'branch_manager']
 
 def can_view(user):
-    return user.role in ['admin', 'loan_officer', 'auditor', 'branch_manager']
+    return getattr(user, 'role', '') in ['admin', 'loan_officer', 'auditor', 'branch_manager']
 
 
 # ─── AUTH: USER PROFILE ───────────────────────────────────────────────────────
 class UserProfileView(APIView):
     permission_classes = [IsAuthenticated]
-
     def get(self, request):
-        serializer = UserSerializer(request.user)
-        return Response(serializer.data)
-
-
+        return Response(UserSerializer(request.user).data)
 # ─── INDIVIDUAL SCORING ───────────────────────────────────────────────────────
 class ScoreIndividualView(APIView):
     permission_classes = [IsAuthenticated]
@@ -120,12 +115,8 @@ class ScoreIndividualView(APIView):
 
     def post(self, request):
         if not is_loan_officer(request.user):
-            return Response(
-                {'error': 'Permission denied. Loan Officer role required.'},
-                status=status.HTTP_403_FORBIDDEN
-            )
+            return Response({'error': 'Permission denied. Loan Officer role required.'}, status=status.HTTP_403_FORBIDDEN)
 
-        # Get form data
         transaction_file = request.FILES.get('transaction_file')
         applicant_ref    = request.data.get('applicant_ref', '').strip()
         applicant_name   = request.data.get('applicant_name', '').strip()
@@ -136,15 +127,9 @@ class ScoreIndividualView(APIView):
         mobile_operator  = request.data.get('mobile_operator', 'mtn')
         notes            = request.data.get('notes', '')
 
-        # Validate required fields
-        if not transaction_file:
-            return Response({'error': 'Transaction file is required.'}, status=status.HTTP_400_BAD_REQUEST)
-        if not applicant_ref:
-            return Response({'error': 'Applicant reference code is required.'}, status=status.HTTP_400_BAD_REQUEST)
-        if not applicant_name:
-            return Response({'error': 'Applicant name is required.'}, status=status.HTTP_400_BAD_REQUEST)
+        if not transaction_file or not applicant_ref or not applicant_name:
+            return Response({'error': 'Missing required target fields.'}, status=status.HTTP_400_BAD_REQUEST)
 
-        # Save file temporarily
         suffix = '.json' if transaction_file.name.endswith('.json') else '.csv'
         with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
             for chunk in transaction_file.chunks():
@@ -152,54 +137,33 @@ class ScoreIndividualView(APIView):
             tmp_path = tmp.name
 
         try:
-            # DYNAMIC PIPELINE ADAPTER: Intercept and translate MoMo file structures automatically
             momo_json_data = convert_momo_file_to_clean_json(tmp_path)
             if momo_json_data is not None:
-                os.unlink(tmp_path)  # Drop old CSV reference point securely
+                os.unlink(tmp_path)
                 with tempfile.NamedTemporaryFile(suffix='.json', mode='w', delete=False) as json_tmp:
                     json_tmp.write(momo_json_data)
                     tmp_path = json_tmp.name
 
-            # Extract indicators using original backend behavior rules
             indicators = extract_indicators(tmp_path, account_age)
+            result = CreditScoringEngine().compute_score(indicators)
 
-            # Run scoring engine
-            engine = CreditScoringEngine()
-            result = engine.compute_score(indicators)
-
-            # Get or create applicant
-            applicant, created = Applicant.objects.get_or_create(
+            applicant, _ = Applicant.objects.get_or_create(
                 applicant_ref=applicant_ref,
                 defaults={
-                    'full_name':       applicant_name,
-                    'phone_number':    phone_number,
-                    'gender':          gender,
-                    'district':        district,
-                    'mobile_operator': mobile_operator,
-                    'institution':     request.user.institution,
-                    'created_by':      request.user,
+                    'full_name': applicant_name, 'phone_number': phone_number,
+                    'gender': gender, 'district': district, 'mobile_operator': mobile_operator,
+                    'institution': getattr(request.user, 'institution', None), 'created_by': request.user,
                 }
             )
 
-            # Save score record
             score = ScoreRecord.objects.create(
-                applicant=applicant,
-                scored_by=request.user,
-                txn_frequency_score=result.txn_frequency_score,
-                avg_txn_value_score=result.avg_txn_value_score,
-                savings_score=result.savings_score,
-                bill_payment_score=result.bill_payment_score,
-                network_diversity_score=result.network_diversity_score,
-                account_age_score=result.account_age_score,
-                csi_total=result.csi_total,
-                risk_tier=result.risk_tier,
-                recommendation=result.recommendation,
-                scoring_mode='individual',
-                notes=notes,
+                applicant=applicant, scored_by=request.user, txn_frequency_score=result.txn_frequency_score,
+                avg_txn_value_score=result.avg_txn_value_score, savings_score=result.savings_score,
+                bill_payment_score=result.bill_payment_score, network_diversity_score=result.network_diversity_score,
+                account_age_score=result.account_age_score, csi_total=result.csi_total, risk_tier=result.risk_tier,
+                recommendation=result.recommendation, scoring_mode='individual', notes=notes,
             )
-
-            serializer = ScoreRecordSerializer(score)
-            return Response(serializer.data, status=status.HTTP_201_CREATED)
+            return Response(ScoreRecordSerializer(score).data, status=status.HTTP_201_CREATED)
 
         except DataIngestionError as e:
             return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
@@ -208,6 +172,8 @@ class ScoreIndividualView(APIView):
         finally:
             if os.path.exists(tmp_path):
                 os.unlink(tmp_path)
+
+
 # ─── BATCH SCORING ────────────────────────────────────────────────────────────
 class ScoreBatchView(APIView):
     permission_classes = [IsAuthenticated]
@@ -215,20 +181,14 @@ class ScoreBatchView(APIView):
 
     def post(self, request):
         if not is_loan_officer(request.user):
-            return Response(
-                {'error': 'Permission denied. Loan Officer role required.'},
-                status=status.HTTP_403_FORBIDDEN
-            )
+            return Response({'error': 'Permission denied. Loan Officer required.'}, status=status.HTTP_403_FORBIDDEN)
 
         transaction_file = request.FILES.get('transaction_file')
-        account_ages_raw = request.data.get('account_ages', '{}')
-        notes            = request.data.get('notes', '')
-
         if not transaction_file:
             return Response({'error': 'Transaction file is required.'}, status=status.HTTP_400_BAD_REQUEST)
 
         try:
-            account_ages = json.loads(account_ages_raw)
+            account_ages = json.loads(request.data.get('account_ages', '{}'))
         except Exception:
             account_ages = {}
 
@@ -238,16 +198,20 @@ class ScoreBatchView(APIView):
                 tmp.write(chunk)
             tmp_path = tmp.name
 
-        # Create batch session
-        session_ref = f"BATCH-{uuid.uuid4().hex[:8].upper()}"
         batch = BatchSession.objects.create(
-            session_ref=session_ref,
-            institution=request.user.institution,
-            created_by=request.user,
-            notes=notes,
+            session_ref=f"BATCH-{uuid.uuid4().hex[:8].upper()}",
+            institution=getattr(request.user, 'institution', None), created_by=request.user, notes=request.data.get('notes', ''),
         )
 
         try:
+            # Apply file conversion directly into bulk processing flow
+            momo_json_data = convert_momo_file_to_clean_json(tmp_path)
+            if momo_json_data is not None:
+                os.unlink(tmp_path)
+                with tempfile.NamedTemporaryFile(suffix='.json', mode='w', delete=False) as json_tmp:
+                    json_tmp.write(momo_json_data)
+                    tmp_path = json_tmp.name
+
             all_indicators = extract_indicators_batch(tmp_path, account_ages)
             batch.total_applicants = len(all_indicators)
             batch.save()
@@ -258,30 +222,15 @@ class ScoreBatchView(APIView):
 
             for ref, indicators in all_indicators.items():
                 try:
-                    result = engine.compute_score(indicators)
+                    res = engine.compute_score(indicators)
                     applicant, _ = Applicant.objects.get_or_create(
                         applicant_ref=ref,
-                        defaults={
-                            'full_name':    f'Applicant {ref}',
-                            'phone_number': '',
-                            'institution':  request.user.institution,
-                            'created_by':   request.user,
-                        }
+                        defaults={'full_name': f'Applicant {ref}', 'phone_number': '', 'institution': getattr(request.user, 'institution', None), 'created_by': request.user}
                     )
                     score = ScoreRecord.objects.create(
-                        applicant=applicant,
-                        scored_by=request.user,
-                        batch=batch,
-                        txn_frequency_score=result.txn_frequency_score,
-                        avg_txn_value_score=result.avg_txn_value_score,
-                        savings_score=result.savings_score,
-                        bill_payment_score=result.bill_payment_score,
-                        network_diversity_score=result.network_diversity_score,
-                        account_age_score=result.account_age_score,
-                        csi_total=result.csi_total,
-                        risk_tier=result.risk_tier,
-                        recommendation=result.recommendation,
-                        scoring_mode='batch',
+                        applicant=applicant, scored_by=request.user, batch=batch, txn_frequency_score=res.txn_frequency_score,
+                        avg_txn_value_score=res.avg_txn_value_score, savings_score=res.savings_score, bill_payment_score=res.bill_payment_score,
+                        network_diversity_score=res.network_diversity_score, account_age_score=res.account_age_score, csi_total=res.csi_total, risk_tier=res.risk_tier, recommendation=res.recommendation, scoring_mode='batch',
                     )
                     results.append(ScoreRecordSerializer(score).data)
                 except Exception:
@@ -291,18 +240,8 @@ class ScoreBatchView(APIView):
             batch.status = 'completed' if failed == 0 else 'partial'
             batch.save()
 
-            return Response({
-                'session_ref': session_ref,
-                'total': batch.total_applicants,
-                'processed': batch.processed_applicants,
-                'failed': failed,
-                'results': results
-            }, status=status.HTTP_201_CREATED)
+            return Response({'session_ref': batch.session_ref, 'total': batch.total_applicants, 'processed': batch.processed_applicants, 'failed': failed, 'results': results}, status=status.HTTP_201_CREATED)
 
-        except DataIngestionError as e:
-            batch.status = 'failed'
-            batch.save()
-            return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
         except Exception as e:
             batch.status = 'failed'
             batch.save()
