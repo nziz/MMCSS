@@ -1,5 +1,9 @@
 from django.db import models
 from django.contrib.auth.models import AbstractUser
+import pyotp
+import random
+from django.utils import timezone
+from datetime import timedelta
 
 
 # ─── USER MODEL ───────────────────────────────────────────────────────────────
@@ -9,13 +13,12 @@ class User(AbstractUser):
     Adds role-based access control for the four system roles.
     """
     ROLE_CHOICES = [
-    ('admin', 'Administrator'),
-    ('loan_officer', 'Loan Officer'),
-    ('auditor', 'Auditor/Viewer'),
-    ('branch_manager', 'Branch Manager'),
-    ('applicant', 'Loan Applicant'),
-    ('applicant', 'Applicant'),
-]
+        ('admin', 'Administrator'),
+        ('loan_officer', 'Loan Officer'),
+        ('auditor', 'Auditor/Viewer'),
+        ('branch_manager', 'Branch Manager'),
+        ('applicant', 'Loan Applicant'),
+    ]
 
     role = models.CharField(
         max_length=20,
@@ -72,7 +75,7 @@ class Institution(models.Model):
         default='sacco'
     )
     district = models.CharField(max_length=100)
-    bnr_license_number = models.CharField(
+    bnr_license_no = models.CharField(  # <-- FIXED: was bnr_license_number
         max_length=100,
         blank=True,
         null=True
@@ -109,7 +112,7 @@ class Applicant(models.Model):
     applicant_ref = models.CharField(
         max_length=50,
         unique=True,
-        db_index=True  # Smart indexing for fast search
+        db_index=True
     )
     full_name = models.CharField(max_length=200)
     phone_number = models.CharField(max_length=20)
@@ -222,7 +225,6 @@ class ScoreRecord(models.Model):
         ('batch', 'Batch/Group'),
     ]
 
-    # Links
     applicant = models.ForeignKey(
         Applicant,
         on_delete=models.CASCADE,
@@ -242,7 +244,6 @@ class ScoreRecord(models.Model):
         related_name='score_records'
     )
 
-    # Sub-scores (one per indicator)
     txn_frequency_score = models.IntegerField(default=0)
     avg_txn_value_score = models.IntegerField(default=0)
     savings_score = models.IntegerField(default=0)
@@ -250,19 +251,17 @@ class ScoreRecord(models.Model):
     network_diversity_score = models.IntegerField(default=0)
     account_age_score = models.IntegerField(default=0)
 
-    # Final result
     csi_total = models.IntegerField(default=0)
     risk_tier = models.CharField(
         max_length=20,
         choices=RISK_TIER_CHOICES,
-        db_index=True  # Smart indexing — filtered frequently
+        db_index=True
     )
     recommendation = models.CharField(
         max_length=25,
         choices=RECOMMENDATION_CHOICES
     )
 
-    # Metadata
     scoring_mode = models.CharField(
         max_length=15,
         choices=SCORING_MODE_CHOICES,
@@ -271,7 +270,7 @@ class ScoreRecord(models.Model):
     observation_months = models.IntegerField(default=6)
     scored_at = models.DateTimeField(
         auto_now_add=True,
-        db_index=True  # Smart indexing — sorted by date
+        db_index=True
     )
     notes = models.TextField(blank=True, null=True)
 
@@ -324,13 +323,9 @@ class BatchSession(models.Model):
 
     def __str__(self):
         return f"Batch {self.session_ref} — {self.total_applicants} applicants ({self.status})"
-        # ─── OTP MODEL ────────────────────────────────────────────────────────────────
-import pyotp
-import random
-from django.utils import timezone
-from datetime import timedelta
 
 
+# ─── OTP MODEL ────────────────────────────────────────────────────────────────
 class OTPVerification(models.Model):
     """
     Stores OTP codes for first-time login verification.
@@ -362,21 +357,18 @@ class OTPVerification(models.Model):
         ordering = ['-created_at']
 
     def save(self, *args, **kwargs):
-        # Auto-set expiry to 10 minutes from creation
         if not self.expires_at:
             self.expires_at = timezone.now() + timedelta(minutes=10)
         super().save(*args, **kwargs)
 
     def is_valid(self):
-        """Check if OTP is still valid."""
         return (
             self.status == 'pending' and
             timezone.now() < self.expires_at and
-            self.attempts < 3  # Max 3 attempts
+            self.attempts < 3
         )
 
     def generate_otp(self):
-        """Generate a secure 6-digit OTP."""
         self.otp_code = str(random.randint(100000, 999999))
         return self.otp_code
 

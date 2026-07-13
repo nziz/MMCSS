@@ -26,9 +26,9 @@ class CustomUserAdmin(UserAdmin):
 
 @admin.register(Institution)
 class InstitutionAdmin(admin.ModelAdmin):
-    list_display = ['name', 'institution_type', 'district', 'bnr_license_number', 'is_active']
+    list_display = ['name', 'institution_type', 'district', 'bnr_license_no', 'is_active']  
     list_filter = ['institution_type', 'district', 'is_active']
-    search_fields = ['name', 'district', 'bnr_license_number']
+    search_fields = ['name', 'district', 'bnr_license_no']  
     ordering = ['name']
 
 
@@ -64,7 +64,8 @@ class BatchSessionAdmin(admin.ModelAdmin):
     search_fields = ['session_ref']
     ordering = ['-created_at']
     readonly_fields = ['created_at', 'completed_at']
-    from .models import OTPVerification
+    # REMOVED: stray "from .models import OTPVerification" was here
+
 
 @admin.register(OTPVerification)
 class OTPVerificationAdmin(admin.ModelAdmin):

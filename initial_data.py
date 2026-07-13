@@ -1,7 +1,6 @@
 """
 Initial Scoring Rules Data
 Run this once to populate the scoring rules in the database.
-Researcher: Nziza Aime Octave | UOK BBIT 2026
 """
 
 import os

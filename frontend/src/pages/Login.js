@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { login } from '../services/api';
 
-export default function Login({ onLogin }) {
+export default function Login({ onLogin, onRegister }) {
     const [username, setUsername] = useState('');
     const [password, setPassword] = useState('');
     const [error, setError] = useState('');
@@ -50,6 +50,27 @@ export default function Login({ onLogin }) {
                         {loading ? 'Signing in...' : 'Sign In'}
                     </button>
                 </form>
+
+                <div style={styles.divider}>
+                    <span style={styles.dividerText}>New applicant?</span>
+                </div>
+
+                <button style={styles.registerBtn} onClick={onRegister}>
+                    Create Applicant Account
+                </button>
+                <p style={{ textAlign: 'center', marginTop: '16px', fontSize: '14px', color: '#666' }}>
+    New applicant?{' '}
+    <span
+        style={{ color: '#1a237e', fontWeight: '700', cursor: 'pointer' }}
+        onClick={onRegister}
+    >
+        Create an account
+    </span>
+</p>
+
+                <p style={styles.note}>
+                    Staff accounts are created by the administrator only.
+                </p>
             </div>
         </div>
     );
@@ -69,4 +90,8 @@ const styles = {
     button: { padding: '14px', background: '#1a237e', color: '#fff', border: 'none', borderRadius: '8px', fontSize: '15px', fontWeight: '600', cursor: 'pointer' },
     buttonDisabled: { padding: '14px', background: '#9e9e9e', color: '#fff', border: 'none', borderRadius: '8px', fontSize: '15px', fontWeight: '600', cursor: 'not-allowed' },
     error: { background: '#ffebee', color: '#c62828', padding: '12px', borderRadius: '8px', fontSize: '13px', textAlign: 'center' },
+    divider: { textAlign: 'center', margin: '24px 0 16px 0', position: 'relative' },
+    dividerText: { background: '#fff', padding: '0 12px', color: '#888', fontSize: '13px' },
+    registerBtn: { width: '100%', padding: '13px', background: 'none', border: '2px solid #1a237e', color: '#1a237e', borderRadius: '8px', fontSize: '14px', fontWeight: '600', cursor: 'pointer' },
+    note: { textAlign: 'center', fontSize: '11px', color: '#aaa', marginTop: '16px', marginBottom: '0' },
 };

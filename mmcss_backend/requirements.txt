@@ -1,1 +1,2 @@
 pip freeze > requirements.txt
+python-decouple>=3.8

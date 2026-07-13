@@ -1,9 +1,9 @@
-import axios from 'axios';
+i
+    import axios from 'axios';
 
 const API = axios.create({
     baseURL: process.env.REACT_APP_API_URL || 'http://127.0.0.1:8000/api',
 });
-
 
 // Automatically attach token to every request
 API.interceptors.request.use((config) => {
@@ -17,6 +17,15 @@ API.interceptors.request.use((config) => {
 // Auth
 export const login = (username, password) =>
     API.post('/auth/login/', { username, password });
+
+export const requestOTP = (username, password) =>
+    API.post('/auth/request-otp/', { username, password });
+
+export const verifyOTP = (username, otp_code) =>
+    API.post('/auth/verify-otp/', { username, otp_code });
+
+export const resendOTP = (username) =>
+    API.post('/auth/resend-otp/', { username });
 
 export const getProfile = () =>
     API.get('/auth/profile/');
@@ -55,14 +64,20 @@ export const getBatches = () =>
 export const getInstitutions = () =>
     API.get('/institutions/');
 
-export default API;
-// Applicant self registration
+// Applicant
 export const registerApplicant = (data) =>
     API.post('/auth/register/', data);
 
-// Applicant own data
 export const getMyScores = () =>
     API.get('/applicant/my-scores/');
 
 export const updateMyProfile = (data) =>
     API.patch('/applicant/my-profile/', data);
+
+export const getApplicantPortal = () =>
+    API.get('/applicant/portal/');
+
+export const applicantUpload = (formData) =>
+    API.post('/applicant/upload/', formData);
+
+export default API;

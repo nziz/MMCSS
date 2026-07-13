@@ -24,7 +24,8 @@ from .ingestion import extract_indicators, extract_indicators_batch, DataIngesti
 from .serializers import (
     ScoreRecordSerializer, ApplicantSerializer,
     BatchSessionSerializer, InstitutionSerializer,
-    ScoringRuleSerializer, UserSerializer
+    ScoringRuleSerializer, UserSerializer,
+    UserRegistrationSerializer ,
 )
 
 
@@ -580,7 +581,6 @@ class UserListView(APIView):
         except Exception as e:
             return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
-
 class UserDetailView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -633,7 +633,7 @@ class ApplicantRegisterView(APIView):
         data = request.data
 
         # Required fields validation
-        required = ['username', 'password', 'email', 'full_name', 'phone_number', 'national_id']
+        required = ['username', 'password', 'email', 'first_name', 'phone_number', 'national_id']
         missing = [f for f in required if not data.get(f, '').strip()]
         if missing:
             return Response(
@@ -672,9 +672,10 @@ class ApplicantRegisterView(APIView):
                 pass
 
         # Parse full name into first/last
-        name_parts = data['full_name'].strip().split(' ', 1)
-        first_name = name_parts[0]
-        last_name = name_parts[1] if len(name_parts) > 1 else ''
+        
+            
+        first_name = data.get('first_name', '').strip()
+        last_name = data.get('last_name', '').strip()
 
         # Create User account
         user = User.objects.create_user(
@@ -694,7 +695,8 @@ class ApplicantRegisterView(APIView):
         applicant_ref = f"APL-{data['national_id'][-6:]}-{user.id}"
         applicant = Applicant.objects.create(
             applicant_ref=applicant_ref,
-            full_name=data['full_name'],
+            first_name=data['first_name'],
+            last_name=data['last_name'],
             phone_number=data['phone_number'],
             gender=data.get('gender', ''),
             district=data.get('district', ''),
@@ -947,48 +949,7 @@ class ApplicantProfileUpdateView(APIView):
             'message': 'Profile updated successfully.',
             'user': UserSerializer(user).data,
         })
-        # ─── APPLICANT SELF REGISTRATION ─────────────────────────────────────────────
-class ApplicantRegisterView(APIView):
-    permission_classes = [AllowAny]
-
-    def post(self, request):
-        username = request.data.get('username', '').strip()
-        email = request.data.get('email', '').strip()
-        password = request.data.get('password', '').strip()
-        first_name = request.data.get('first_name', '').strip()
-        last_name = request.data.get('last_name', '').strip()
-        phone_number = request.data.get('phone_number', '').strip()
-
-        if not username:
-            return Response({'error': 'Username is required.'}, status=status.HTTP_400_BAD_REQUEST)
-        if not email:
-            return Response({'error': 'Email is required.'}, status=status.HTTP_400_BAD_REQUEST)
-        if not password:
-            return Response({'error': 'Password is required.'}, status=status.HTTP_400_BAD_REQUEST)
-        if len(password) < 8:
-            return Response({'error': 'Password must be at least 8 characters.'}, status=status.HTTP_400_BAD_REQUEST)
-        if User.objects.filter(username=username).exists():
-            return Response({'error': 'Username already taken.'}, status=status.HTTP_400_BAD_REQUEST)
-        if User.objects.filter(email=email).exists():
-            return Response({'error': 'Email already registered.'}, status=status.HTTP_400_BAD_REQUEST)
-
-        try:
-            user = User.objects.create_user(
-                username=username,
-                email=email,
-                password=password,
-                first_name=first_name,
-                last_name=last_name,
-                phone_number=phone_number,
-                role='applicant',
-                is_active=True,
-            )
-            return Response({
-                'message': 'Account created successfully! You can now login.',
-                'username': user.username,
-            }, status=status.HTTP_201_CREATED)
-        except Exception as e:
-            return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        # ─── APPLICANT SELF REGISTRATION 
 
 
 # ─── APPLICANT OWN SCORES ─────────────────────────────────────────────────────
@@ -1021,3 +982,124 @@ class ApplicantProfileView(APIView):
             user.set_password(new_password)
         user.save()
         return Response(UserSerializer(user).data)
+    # ─── USER REGISTRATION (for admin-created users) ──────────────────────────────
+class UserRegisterView(APIView):
+    """
+    Admin-only endpoint to register new staff users.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        if not is_admin(request.user):
+            return Response({'error': 'Admin access required.'}, status=status.HTTP_403_FORBIDDEN)
+
+        serializer = UserRegistrationSerializer(data=request.data)
+        if serializer.is_valid():
+            user = serializer.save()
+            return Response({
+                'message': 'User created successfully.',
+                'user': UserSerializer(user).data
+            }, status=status.HTTP_201_CREATED)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+# ─── APPLICANT LIST (for admin/loan officers) ─────────────────────────────────
+class ApplicantListView(APIView):
+    """
+    List all applicants with filtering and search.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        if not can_view(request.user):
+            return Response({'error': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
+
+        applicants = Applicant.objects.select_related('institution', 'created_by')
+
+        # Branch managers see only their institution
+        if request.user.role == 'branch_manager':
+            applicants = applicants.filter(institution=request.user.institution)
+
+        # Search filter
+        search = request.query_params.get('search', '')
+        if search:
+            applicants = applicants.filter(
+                full_name__icontains=search
+            ) | applicants.filter(
+                applicant_ref__icontains=search
+            ) | applicants.filter(
+                phone_number__icontains=search
+            )
+
+        # District filter
+        district = request.query_params.get('district', '')
+        if district:
+            applicants = applicants.filter(district__icontains=district)
+
+        # Operator filter
+        operator = request.query_params.get('operator', '')
+        if operator:
+            applicants = applicants.filter(mobile_operator=operator)
+
+        applicants = applicants.order_by('-created_at')[:100]
+        serializer = ApplicantSerializer(applicants, many=True)
+        return Response(serializer.data)
+
+
+# ─── SCORE ANALYTICS (detailed analytics endpoint) ────────────────────────────
+class ScoreAnalyticsView(APIView):
+    """
+    Detailed analytics and trends for scoring data.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        if not can_view(request.user):
+            return Response({'error': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
+
+        scores = ScoreRecord.objects.all()
+
+        if request.user.role == 'branch_manager':
+            scores = scores.filter(applicant__institution=request.user.institution)
+
+        # Time-based filtering
+        period = request.query_params.get('period', 'all')  # all, week, month, year
+        from django.utils import timezone
+        from datetime import timedelta
+
+        now = timezone.now()
+        if period == 'week':
+            scores = scores.filter(scored_at__gte=now - timedelta(days=7))
+        elif period == 'month':
+            scores = scores.filter(scored_at__gte=now - timedelta(days=30))
+        elif period == 'year':
+            scores = scores.filter(scored_at__gte=now - timedelta(days=365))
+
+        total = scores.count()
+        avg_csi = scores.aggregate(avg=Avg('csi_total'))['avg'] or 0
+
+        # Tier distribution
+        tier_counts = scores.values('risk_tier').annotate(count=Count('risk_tier'))
+        tier_distribution = {item['risk_tier']: item['count'] for item in tier_counts}
+
+        # Mode distribution
+        mode_counts = scores.values('scoring_mode').annotate(count=Count('scoring_mode'))
+        mode_distribution = {item['scoring_mode']: item['count'] for item in mode_counts}
+
+        # Top scorers
+        top_scorers = scores.order_by('-csi_total')[:5]
+        top_scorers_data = ScoreRecordSerializer(top_scorers, many=True).data
+
+        # Recent activity
+        recent_scores = scores.order_by('-scored_at')[:10]
+        recent_activity = ScoreRecordSerializer(recent_scores, many=True).data
+
+        return Response({
+            'total_scored': total,
+            'average_csi': round(avg_csi, 1),
+            'tier_distribution': tier_distribution,
+            'mode_distribution': mode_distribution,
+            'top_scorers': top_scorers_data,
+            'recent_activity': recent_activity,
+            'period': period,
+        })
