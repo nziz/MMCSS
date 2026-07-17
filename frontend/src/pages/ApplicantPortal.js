@@ -1,10 +1,17 @@
-import React, { useState, useEffect } from 'react';
-import axios from 'axios';
+import React, { useState, useEffect, useCallback } from 'react';
+import { getApplicantPortal, uploadApplicantFile, updateApplicantProfile } from '../services/api';
 
-const API = 'http://127.0.0.1:8000/api';
-const getToken = () => localStorage.getItem('access_token');
+const getTierColor = (tier) => ({
+    excellent: '#1b5e20', good: '#2e7d32',
+    fair: '#f57f17', poor: '#e65100', very_poor: '#b71c1c',
+}[tier] || '#666');
 
-export default function ApplicantPortal({ user, onLogout }) {
+const getTierBg = (tier) => ({
+    excellent: '#e8f5e9', good: '#f1f8e9',
+    fair: '#fff8e1', poor: '#fff3e0', very_poor: '#ffebee',
+}[tier] || '#f5f5f5');
+
+export default function ApplicantPortal({ user, onLogout, addToast }) {
     const [data, setData] = useState(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
@@ -15,18 +22,11 @@ export default function ApplicantPortal({ user, onLogout }) {
     const [accountAge, setAccountAge] = useState(12);
     const [profileForm, setProfileForm] = useState({});
     const [profileMsg, setProfileMsg] = useState('');
-    const [selectedScore, setSelectedScore] = useState(null);
 
-    useEffect(() => {
-        fetchPortalData();
-    }, []);
-
-    const fetchPortalData = async () => {
+    const fetchPortalData = useCallback(async () => {
         setLoading(true);
         try {
-            const res = await axios.get(`${API}/applicant/portal/`, {
-                headers: { Authorization: `Bearer ${getToken()}` }
-            });
+            const res = await getApplicantPortal();
             setData(res.data);
             setProfileForm({
                 first_name: user?.first_name || '',
@@ -35,32 +35,40 @@ export default function ApplicantPortal({ user, onLogout }) {
                 phone_number: user?.phone_number || '',
             });
         } catch (err) {
-            setError('Failed to load your data. Please try again.');
+            const msg = 'Failed to load your data. Please try again.';
+            setError(msg);
+            if (addToast) addToast(msg, 'error');
         } finally {
             setLoading(false);
         }
-    };
+    }, [user, addToast]);
+
+    useEffect(() => {
+        fetchPortalData();
+    }, [fetchPortalData]);
 
     const handleUpload = async (e) => {
         e.preventDefault();
-        if (!file) { setUploadMsg('Please select a CSV file.'); return; }
+        if (!file) {
+            setUploadMsg('Please select a CSV file.');
+            if (addToast) addToast('Please select a CSV file.', 'warning');
+            return;
+        }
         setUploading(true);
         setUploadMsg('');
         const formData = new FormData();
         formData.append('transaction_file', file);
         formData.append('account_age_months', accountAge);
         try {
-            const res = await axios.post(`${API}/applicant/upload/`, formData, {
-                headers: {
-                    Authorization: `Bearer ${getToken()}`,
-                    'Content-Type': 'multipart/form-data',
-                }
-            });
+            const res = await uploadApplicantFile(formData);
             setUploadMsg('✅ ' + res.data.message);
             fetchPortalData();
             setTab('dashboard');
+            if (addToast) addToast(res.data.message, 'success');
         } catch (err) {
-            setUploadMsg('❌ ' + (err.response?.data?.error || 'Upload failed.'));
+            const msg = err.response?.data?.error || err.response?.data?.detail || 'Upload failed.';
+            setUploadMsg('❌ ' + msg);
+            if (addToast) addToast(msg, 'error');
         } finally {
             setUploading(false);
         }
@@ -70,33 +78,26 @@ export default function ApplicantPortal({ user, onLogout }) {
         e.preventDefault();
         setProfileMsg('');
         try {
-            await axios.put(`${API}/applicant/profile/`, profileForm, {
-                headers: { Authorization: `Bearer ${getToken()}` }
-            });
+            await updateApplicantProfile(profileForm);
             setProfileMsg('✅ Profile updated successfully!');
+            if (addToast) addToast('Profile updated successfully!', 'success');
         } catch (err) {
-            setProfileMsg('❌ ' + (err.response?.data?.error || 'Update failed.'));
+            const msg = err.response?.data?.error || err.response?.data?.detail || 'Update failed.';
+            setProfileMsg('❌ ' + msg);
+            if (addToast) addToast(msg, 'error');
         }
     };
 
-    const getTierColor = (tier) => ({
-        excellent: '#1b5e20', good: '#2e7d32',
-        fair: '#f57f17', poor: '#e65100', very_poor: '#b71c1c',
-    }[tier] || '#666');
-
-    const getTierBg = (tier) => ({
-        excellent: '#e8f5e9', good: '#f1f8e9',
-        fair: '#fff8e1', poor: '#fff3e0', very_poor: '#ffebee',
-    }[tier] || '#f5f5f5');
-
-    if (loading) return (
-        <div style={styles.loadingPage}>
-            <div style={styles.loadingCard}>
-                <div style={styles.loadingSpinner}>⏳</div>
-                <p>Loading your portal...</p>
+    if (loading) {
+        return (
+            <div style={styles.loadingPage}>
+                <div className="card" style={{ textAlign: 'center', padding: '40px' }}>
+                    <div className="skeleton" style={{ width: '60px', height: '60px', borderRadius: '50%', margin: '0 auto 16px' }} />
+                    <div className="skeleton skeleton-text" style={{ width: '200px', margin: '0 auto' }} />
+                </div>
             </div>
-        </div>
-    );
+        );
+    }
 
     const stats = data?.statistics || {};
     const scores = data?.score_history || [];
@@ -139,7 +140,11 @@ export default function ApplicantPortal({ user, onLogout }) {
             </div>
 
             <div style={styles.content}>
-                {error && <div style={styles.error}>{error}</div>}
+                {error && (
+                    <div style={styles.error} role="alert">
+                        <span>❌</span> {error}
+                    </div>
+                )}
 
                 {/* ── DASHBOARD TAB ── */}
                 {tab === 'dashboard' && (
@@ -159,7 +164,7 @@ export default function ApplicantPortal({ user, onLogout }) {
                                 { label: 'Latest Score', value: stats.latest_csi ? `${stats.latest_csi}/100` : '—', color: '#f57f17' },
                                 { label: 'Latest Tier', value: stats.latest_tier?.replace('_', ' ').toUpperCase() || '—', color: getTierColor(stats.latest_tier) },
                             ].map(item => (
-                                <div key={item.label} style={styles.statCard}>
+                                <div key={item.label} className="card" style={{ textAlign: 'center' }}>
                                     <p style={styles.statLabel}>{item.label}</p>
                                     <p style={{ ...styles.statValue, color: item.color }}>
                                         {item.value}
@@ -170,10 +175,10 @@ export default function ApplicantPortal({ user, onLogout }) {
 
                         {/* Latest Score Card */}
                         {scores.length > 0 && (
-                            <div style={{
-                                ...styles.latestCard,
+                            <div className="card" style={{
                                 backgroundColor: getTierBg(stats.latest_tier),
                                 borderLeft: `6px solid ${getTierColor(stats.latest_tier)}`,
+                                marginTop: '16px',
                             }}>
                                 <h3 style={styles.latestTitle}>Your Latest Credit Score</h3>
                                 <div style={styles.latestScore}>
@@ -195,30 +200,14 @@ export default function ApplicantPortal({ user, onLogout }) {
                                         {stats.latest_tier?.replace('_', ' ').toUpperCase()}
                                     </span>
                                 </div>
-                                <p style={styles.latestRec}>
-                                    Recommendation: <strong style={{ color: getTierColor(stats.latest_tier) }}>
-                                        {scores[0]?.recommendation_display}
-                                    </strong>
-                                </p>
-                                <p style={styles.latestDate}>
-                                    Scored on: {new Date(scores[0]?.scored_at).toLocaleDateString('en-GB', {
-                                        day: '2-digit', month: 'long', year: 'numeric'
-                                    })}
-                                </p>
                             </div>
                         )}
 
                         {scores.length === 0 && (
-                            <div style={styles.noScoreCard}>
-                                <div style={styles.noScoreIcon}>📊</div>
-                                <h3>No scores yet</h3>
-                                <p>Upload your mobile money transaction file to get your credit score.</p>
-                                <button
-                                    style={styles.uploadNowBtn}
-                                    onClick={() => setTab('upload')}
-                                >
-                                    Upload Transactions Now →
-                                </button>
+                            <div className="empty-state card">
+                                <div className="empty-state-icon">📭</div>
+                                <h3 className="empty-state-title">No scores yet</h3>
+                                <p className="empty-state-text">Upload your transaction data to get your first credit score.</p>
                             </div>
                         )}
                     </div>
@@ -226,147 +215,96 @@ export default function ApplicantPortal({ user, onLogout }) {
 
                 {/* ── UPLOAD TAB ── */}
                 {tab === 'upload' && (
-                    <div style={styles.uploadSection}>
-                        <h2 style={styles.pageTitle}>📤 Request Credit Scoring</h2>
-                        <p style={styles.pageSubtitle}>
-                            Upload your mobile money transaction CSV file to compute your credit score
-                        </p>
-
-                        <div style={styles.uploadCard}>
-                            <div style={styles.formatBox}>
-                                <h4 style={styles.formatTitle}>📋 Required CSV Format</h4>
-                                <code style={styles.formatCode}>
-                                    transaction_date, transaction_type, amount_rwf,
-                                    counterparty_id, is_savings, is_bill_payment
-                                </code>
+                    <div className="card">
+                        <h3 style={{ margin: '0 0 16px 0', color: '#1a237e' }}>Request New Credit Scoring</h3>
+                        <form onSubmit={handleUpload} style={styles.form}>
+                            {uploadMsg && (
+                                <div style={{
+                                    padding: '12px 16px', borderRadius: '8px', marginBottom: '16px', fontSize: '14px',
+                                    background: uploadMsg.startsWith('✅') ? '#e8f5e9' : '#ffebee',
+                                    color: uploadMsg.startsWith('✅') ? '#2e7d32' : '#c62828',
+                                }}>
+                                    {uploadMsg}
+                                </div>
+                            )}
+                            <div style={styles.field}>
+                                <label style={styles.label}>Account Age (Months)</label>
+                                <input
+                                    type="number"
+                                    value={accountAge}
+                                    onChange={(e) => setAccountAge(e.target.value)}
+                                    style={styles.input}
+                                    min="0"
+                                />
                             </div>
-
-                            <form onSubmit={handleUpload} style={styles.uploadForm}>
-                                <div style={styles.field}>
-                                    <label style={styles.label}>
-                                        Transaction File (CSV) *
-                                    </label>
-                                    <input
-                                        type="file"
-                                        accept=".csv,.json"
-                                        onChange={e => setFile(e.target.files[0])}
-                                        style={styles.fileInput}
-                                    />
-                                </div>
-                                <div style={styles.field}>
-                                    <label style={styles.label}>
-                                        Account Age (months) *
-                                    </label>
-                                    <input
-                                        type="number"
-                                        min="0"
-                                        max="240"
-                                        value={accountAge}
-                                        onChange={e => setAccountAge(e.target.value)}
-                                        style={styles.numberInput}
-                                    />
-                                    <small style={styles.hint}>
-                                        How many months have you been using mobile money?
-                                    </small>
-                                </div>
-                                {uploadMsg && (
-                                    <div style={{
-                                        ...styles.uploadMsg,
-                                        background: uploadMsg.startsWith('✅') ? '#e8f5e9' : '#ffebee',
-                                        color: uploadMsg.startsWith('✅') ? '#2e7d32' : '#c62828',
-                                    }}>
-                                        {uploadMsg}
-                                    </div>
+                            <div style={styles.field}>
+                                <label style={styles.label}>Upload Bank Statement / Transaction CSV</label>
+                                <input
+                                    type="file"
+                                    accept=".csv"
+                                    onChange={(e) => setFile(e.target.files[0])}
+                                    style={styles.input}
+                                />
+                                {file && (
+                                    <p style={{ fontSize: '12px', color: '#2e7d32', marginTop: '6px' }}>
+                                        ✅ Selected: {file.name} ({(file.size / 1024).toFixed(1)} KB)
+                                    </p>
                                 )}
-                                <button
-                                    type="submit"
-                                    style={styles.submitBtn}
-                                    disabled={uploading}
-                                >
-                                    {uploading ? 'Computing score...' : '🚀 Submit for Scoring'}
-                                </button>
-                            </form>
-                        </div>
+                            </div>
+                            <button
+                                type="submit"
+                                disabled={uploading}
+                                style={uploading ? styles.submitBtnDisabled : styles.submitBtn}
+                            >
+                                {uploading ? (
+                                    <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                        <span style={styles.spinner} /> Uploading...
+                                    </span>
+                                ) : '📤 Submit for Scoring'}
+                            </button>
+                        </form>
                     </div>
                 )}
 
                 {/* ── HISTORY TAB ── */}
                 {tab === 'history' && (
                     <div>
-                        <h2 style={styles.pageTitle}>📋 My Score History</h2>
-                        <p style={styles.pageSubtitle}>
-                            All your previous credit score records
-                        </p>
-
+                        <h3 style={{ margin: '0 0 16px 0', color: '#1a237e' }}>Your Score History</h3>
                         {scores.length === 0 ? (
-                            <div style={styles.noScoreCard}>
-                                <div style={styles.noScoreIcon}>📋</div>
-                                <p>No scoring history yet.</p>
+                            <div className="empty-state card">
+                                <div className="empty-state-icon">📭</div>
+                                <h3 className="empty-state-title">No scores yet</h3>
+                                <p className="empty-state-text">Upload your transaction data to see your scoring history.</p>
                             </div>
                         ) : (
-                            scores.map(score => (
+                            scores.map((score) => (
                                 <div
                                     key={score.id}
+                                    className="card"
                                     style={{
-                                        ...styles.historyCard,
-                                        backgroundColor: getTierBg(score.risk_tier),
-                                        borderLeft: `5px solid ${getTierColor(score.risk_tier)}`,
+                                        marginBottom: '12px',
+                                        borderLeft: `4px solid ${getTierColor(score.risk_tier)}`,
                                     }}
-                                    onClick={() => setSelectedScore(
-                                        selectedScore?.id === score.id ? null : score
-                                    )}
                                 >
-                                    <div style={styles.historyHeader}>
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
                                         <div>
                                             <span style={{
                                                 background: getTierColor(score.risk_tier),
-                                                color: '#fff', padding: '4px 14px',
-                                                borderRadius: '20px', fontSize: '12px',
-                                                fontWeight: '700', marginRight: '12px',
+                                                color: '#fff', padding: '3px 10px',
+                                                borderRadius: '12px', fontSize: '11px', fontWeight: '700',
                                             }}>
                                                 {score.risk_tier_display?.toUpperCase()}
                                             </span>
-                                            <span style={{ fontSize: '20px', fontWeight: '700' }}>
+                                            <span style={{ marginLeft: '10px', fontWeight: '700', color: '#1a237e' }}>
                                                 CSI: {score.csi_total}/100
                                             </span>
                                         </div>
-                                        <span style={{ fontSize: '13px', color: '#666' }}>
+                                        <span style={{ fontSize: '12px', color: '#888' }}>
                                             {new Date(score.scored_at).toLocaleDateString('en-GB')}
                                         </span>
                                     </div>
-
-                                    <p style={{ margin: '8px 0 4px', fontSize: '14px', color: '#555' }}>
-                                        Recommendation: <strong style={{ color: getTierColor(score.risk_tier) }}>
-                                            {score.recommendation_display}
-                                        </strong>
-                                    </p>
-
-                                    {selectedScore?.id === score.id && (
-                                        <div style={styles.breakdown}>
-                                            {[
-                                                { label: 'Transaction Frequency', s: score.txn_frequency_score, max: 25 },
-                                                { label: 'Avg Transaction Value', s: score.avg_txn_value_score, max: 20 },
-                                                { label: 'Savings Consistency', s: score.savings_score, max: 20 },
-                                                { label: 'Bill Payment Regularity', s: score.bill_payment_score, max: 15 },
-                                                { label: 'Network Diversity', s: score.network_diversity_score, max: 10 },
-                                                { label: 'Account Age', s: score.account_age_score, max: 10 },
-                                            ].map(item => (
-                                                <div key={item.label} style={styles.barRow}>
-                                                    <span style={styles.barLabel}>{item.label}</span>
-                                                    <div style={styles.barTrack}>
-                                                        <div style={{
-                                                            ...styles.barFill,
-                                                            width: `${(item.s / item.max) * 100}%`,
-                                                            background: getTierColor(score.risk_tier),
-                                                        }} />
-                                                    </div>
-                                                    <span style={styles.barScore}>{item.s}/{item.max}</span>
-                                                </div>
-                                            ))}
-                                        </div>
-                                    )}
-                                    <p style={{ fontSize: '12px', color: '#999', marginTop: '8px', textAlign: 'center' }}>
-                                        {selectedScore?.id === score.id ? '▲ Collapse' : '▼ View breakdown'}
+                                    <p style={{ margin: '8px 0 0 0', fontSize: '13px', color: '#555' }}>
+                                        {score.recommendation_display}
                                     </p>
                                 </div>
                             ))
@@ -376,113 +314,59 @@ export default function ApplicantPortal({ user, onLogout }) {
 
                 {/* ── PROFILE TAB ── */}
                 {tab === 'profile' && (
-                    <div>
-                        <h2 style={styles.pageTitle}>👤 My Profile</h2>
-                        <p style={styles.pageSubtitle}>
-                            Update your personal information and credentials
-                        </p>
-
-                        <div style={styles.profileCard}>
-                            <form onSubmit={handleProfileUpdate}>
-                                <div style={styles.row}>
-                                    <div style={styles.field}>
-                                        <label style={styles.label}>First Name</label>
-                                        <input
-                                            style={styles.input}
-                                            value={profileForm.first_name || ''}
-                                            onChange={e => setProfileForm({
-                                                ...profileForm, first_name: e.target.value
-                                            })}
-                                        />
-                                    </div>
-                                    <div style={styles.field}>
-                                        <label style={styles.label}>Last Name</label>
-                                        <input
-                                            style={styles.input}
-                                            value={profileForm.last_name || ''}
-                                            onChange={e => setProfileForm({
-                                                ...profileForm, last_name: e.target.value
-                                            })}
-                                        />
-                                    </div>
-                                </div>
-                                <div style={styles.row}>
-                                    <div style={styles.field}>
-                                        <label style={styles.label}>Email Address</label>
-                                        <input
-                                            style={styles.input}
-                                            type="email"
-                                            value={profileForm.email || ''}
-                                            onChange={e => setProfileForm({
-                                                ...profileForm, email: e.target.value
-                                            })}
-                                        />
-                                    </div>
-                                    <div style={styles.field}>
-                                        <label style={styles.label}>Phone Number</label>
-                                        <input
-                                            style={styles.input}
-                                            value={profileForm.phone_number || ''}
-                                            onChange={e => setProfileForm({
-                                                ...profileForm, phone_number: e.target.value
-                                            })}
-                                        />
-                                    </div>
-                                </div>
-
-                                <div style={styles.divider} />
-                                <h4 style={styles.passwordTitle}>Change Password</h4>
-                                <div style={styles.row}>
-                                    <div style={styles.field}>
-                                        <label style={styles.label}>Current Password</label>
-                                        <input
-                                            style={styles.input}
-                                            type="password"
-                                            value={profileForm.old_password || ''}
-                                            onChange={e => setProfileForm({
-                                                ...profileForm, old_password: e.target.value
-                                            })}
-                                        />
-                                    </div>
-                                    <div style={styles.field}>
-                                        <label style={styles.label}>New Password</label>
-                                        <input
-                                            style={styles.input}
-                                            type="password"
-                                            value={profileForm.new_password || ''}
-                                            onChange={e => setProfileForm({
-                                                ...profileForm, new_password: e.target.value
-                                            })}
-                                        />
-                                    </div>
-                                </div>
-
-                                {profileMsg && (
-                                    <div style={{
-                                        ...styles.uploadMsg,
-                                        background: profileMsg.startsWith('✅') ? '#e8f5e9' : '#ffebee',
-                                        color: profileMsg.startsWith('✅') ? '#2e7d32' : '#c62828',
-                                    }}>
-                                        {profileMsg}
-                                    </div>
-                                )}
-
-                                <button type="submit" style={styles.submitBtn}>
-                                    💾 Save Changes
-                                </button>
-                            </form>
-
-                            {/* Applicant Info (read only) */}
-                            <div style={styles.divider} />
-                            <h4 style={styles.passwordTitle}>Applicant Reference</h4>
-                            <div style={styles.refBox}>
-                                <p style={styles.refLabel}>Your Reference Code:</p>
-                                <p style={styles.refValue}>{applicant.applicant_ref}</p>
-                                <p style={styles.refHint}>
-                                    Use this reference code when communicating with your MFI/SACCO
-                                </p>
+                    <div className="card">
+                        <h3 style={{ margin: '0 0 16px 0', color: '#1a237e' }}>Update Your Profile</h3>
+                        {profileMsg && (
+                            <div style={{
+                                padding: '12px 16px', borderRadius: '8px', marginBottom: '16px', fontSize: '14px',
+                                background: profileMsg.startsWith('✅') ? '#e8f5e9' : '#ffebee',
+                                color: profileMsg.startsWith('✅') ? '#2e7d32' : '#c62828',
+                            }}>
+                                {profileMsg}
                             </div>
-                        </div>
+                        )}
+                        <form onSubmit={handleProfileUpdate} style={styles.form}>
+                            <div style={styles.grid2}>
+                                <div style={styles.field}>
+                                    <label style={styles.label}>First Name</label>
+                                    <input
+                                        style={styles.input}
+                                        value={profileForm.first_name || ''}
+                                        onChange={(e) => setProfileForm({ ...profileForm, first_name: e.target.value })}
+                                    />
+                                </div>
+                                <div style={styles.field}>
+                                    <label style={styles.label}>Last Name</label>
+                                    <input
+                                        style={styles.input}
+                                        value={profileForm.last_name || ''}
+                                        onChange={(e) => setProfileForm({ ...profileForm, last_name: e.target.value })}
+                                    />
+                                </div>
+                            </div>
+                            <div style={styles.grid2}>
+                                <div style={styles.field}>
+                                    <label style={styles.label}>Email</label>
+                                    <input
+                                        style={styles.input}
+                                        type="email"
+                                        value={profileForm.email || ''}
+                                        onChange={(e) => setProfileForm({ ...profileForm, email: e.target.value })}
+                                    />
+                                </div>
+                                <div style={styles.field}>
+                                    <label style={styles.label}>Phone Number</label>
+                                    <input
+                                        style={styles.input}
+                                        value={profileForm.phone_number || ''}
+                                        onChange={(e) => setProfileForm({ ...profileForm, phone_number: e.target.value })}
+                                    />
+                                </div>
+                            </div>
+                            <button type="submit" style={styles.submitBtn}>
+                                💾 Save Changes
+                            </button>
+                        </form>
                     </div>
                 )}
             </div>
@@ -491,97 +375,71 @@ export default function ApplicantPortal({ user, onLogout }) {
 }
 
 const styles = {
-    page: { minHeight: '100vh', background: '#f5f6fa', fontFamily: 'Segoe UI, sans-serif' },
-    loadingPage: { minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#f5f6fa' },
-    loadingCard: { textAlign: 'center', padding: '40px' },
-    loadingSpinner: { fontSize: '48px', marginBottom: '16px' },
+    page: { maxWidth: '900px', margin: '0 auto' },
     topBar: {
-        background: '#1a237e', padding: '0 32px', height: '60px',
-        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        position: 'sticky', top: 0, zIndex: 100,
+        display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+        marginBottom: '24px', paddingBottom: '16px',
+        borderBottom: '1px solid #e0e0e0',
     },
-    topLogo: { display: 'flex', alignItems: 'center', gap: '12px' },
-    topLogoText: { color: '#fff', fontWeight: '800', fontSize: '20px' },
-    topLogoSub: { color: 'rgba(255,255,255,0.6)', fontSize: '13px' },
-    topUser: { display: 'flex', alignItems: 'center', gap: '16px' },
-    topUserName: { color: '#fff', fontSize: '14px', fontWeight: '600' },
+    topLogo: { display: 'flex', flexDirection: 'column' },
+    topLogoText: { fontSize: '22px', fontWeight: '800', color: '#1a237e' },
+    topLogoSub: { fontSize: '12px', color: '#888' },
+    topUser: { display: 'flex', alignItems: 'center', gap: '12px' },
+    topUserName: { fontSize: '14px', color: '#333', fontWeight: '600' },
     logoutBtn: {
-        background: 'rgba(255,255,255,0.15)', border: '1px solid rgba(255,255,255,0.3)',
-        color: '#fff', padding: '6px 16px', borderRadius: '6px',
-        cursor: 'pointer', fontSize: '13px',
+        padding: '8px 16px', background: '#b71c1c', color: '#fff',
+        border: 'none', borderRadius: '6px', fontSize: '13px',
+        cursor: 'pointer', fontWeight: '600',
     },
     tabBar: {
-        background: '#fff', padding: '0 32px', borderBottom: '1px solid #e0e0e0',
-        display: 'flex', gap: '4px',
+        display: 'flex', gap: '8px', marginBottom: '24px',
+        flexWrap: 'wrap',
     },
     tab: {
-        padding: '16px 20px', background: 'none', border: 'none',
-        borderBottom: '3px solid transparent', cursor: 'pointer',
-        fontSize: '14px', color: '#666', fontWeight: '500',
+        padding: '10px 18px', background: '#fff', border: '2px solid #e0e0e0',
+        borderRadius: '8px', cursor: 'pointer', fontSize: '14px',
+        fontWeight: '600', color: '#666', fontFamily: 'inherit',
     },
     tabActive: {
-        padding: '16px 20px', background: 'none', border: 'none',
-        borderBottom: '3px solid #1a237e', cursor: 'pointer',
-        fontSize: '14px', color: '#1a237e', fontWeight: '700',
+        padding: '10px 18px', background: '#1a237e', border: '2px solid #1a237e',
+        borderRadius: '8px', cursor: 'pointer', fontSize: '14px',
+        fontWeight: '600', color: '#fff', fontFamily: 'inherit',
     },
-    content: { padding: '32px', maxWidth: '900px', margin: '0 auto' },
-    error: { background: '#ffebee', color: '#c62828', padding: '12px 16px', borderRadius: '8px', marginBottom: '20px' },
-    pageTitle: { fontSize: '24px', fontWeight: '700', color: '#1a237e', margin: '0 0 8px 0' },
-    pageSubtitle: { color: '#666', fontSize: '15px', margin: '0 0 28px 0' },
-    statsGrid: { display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '16px', marginBottom: '28px' },
-    statCard: { background: '#fff', borderRadius: '12px', padding: '20px', boxShadow: '0 2px 8px rgba(0,0,0,0.06)' },
-    statLabel: { margin: '0 0 8px 0', fontSize: '12px', color: '#999', textTransform: 'uppercase' },
-    statValue: { margin: 0, fontSize: '24px', fontWeight: '800' },
-    latestCard: { borderRadius: '12px', padding: '28px', textAlign: 'center', boxShadow: '0 2px 8px rgba(0,0,0,0.06)' },
-    latestTitle: { margin: '0 0 16px 0', fontSize: '16px', color: '#555' },
-    latestScore: { display: 'flex', alignItems: 'baseline', justifyContent: 'center', gap: '4px', marginBottom: '16px' },
-    csiNumber: { fontSize: '64px', fontWeight: '900', lineHeight: 1 },
-    csiMax: { fontSize: '24px', color: '#999', fontWeight: '600' },
-    latestTierBadge: { marginBottom: '12px' },
-    latestRec: { fontSize: '15px', color: '#555', margin: '8px 0' },
-    latestDate: { fontSize: '13px', color: '#999', margin: 0 },
-    noScoreCard: {
-        background: '#fff', borderRadius: '12px', padding: '48px',
-        textAlign: 'center', boxShadow: '0 2px 8px rgba(0,0,0,0.06)',
+    content: { paddingBottom: '40px' },
+    error: {
+        background: '#ffebee', color: '#c62828', padding: '12px 16px',
+        borderRadius: '8px', marginBottom: '16px', fontSize: '14px',
+        display: 'flex', alignItems: 'center', gap: '8px',
     },
-    noScoreIcon: { fontSize: '48px', marginBottom: '16px' },
-    uploadNowBtn: {
-        marginTop: '16px', padding: '12px 28px',
-        background: '#1a237e', color: '#fff', border: 'none',
-        borderRadius: '8px', cursor: 'pointer', fontSize: '15px', fontWeight: '600',
-    },
-    uploadSection: {},
-    uploadCard: { background: '#fff', borderRadius: '12px', padding: '28px', boxShadow: '0 2px 8px rgba(0,0,0,0.06)' },
-    formatBox: { background: '#f8f9ff', borderRadius: '8px', padding: '16px', marginBottom: '24px', border: '1px solid #e8eaf6' },
-    formatTitle: { margin: '0 0 8px 0', fontSize: '14px', color: '#1a237e' },
-    formatCode: { fontSize: '13px', color: '#555', display: 'block', lineHeight: 1.6 },
-    uploadForm: { display: 'flex', flexDirection: 'column', gap: '20px' },
+    pageTitle: { fontSize: '22px', fontWeight: '700', color: '#1a237e', marginBottom: '4px' },
+    pageSubtitle: { color: '#666', margin: '0 0 24px 0', fontSize: '15px' },
+    statsGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '14px', marginBottom: '16px' },
+    statLabel: { fontSize: '11px', color: '#888', margin: '0 0 6px 0', textTransform: 'uppercase', fontWeight: '600' },
+    statValue: { fontSize: '28px', fontWeight: '800', margin: 0 },
+    latestTitle: { fontSize: '16px', fontWeight: '700', color: '#333', margin: '0 0 12px 0' },
+    latestScore: { display: 'flex', alignItems: 'baseline', gap: '8px', marginBottom: '12px' },
+    csiNumber: { fontSize: '48px', fontWeight: '800' },
+    csiMax: { fontSize: '20px', color: '#888', fontWeight: '600' },
+    latestTierBadge: { textAlign: 'center' },
+    form: { display: 'flex', flexDirection: 'column', gap: '16px' },
     field: { display: 'flex', flexDirection: 'column', gap: '6px' },
-    label: { fontSize: '13px', fontWeight: '600', color: '#555' },
-    fileInput: { padding: '10px', border: '2px dashed #1a237e', borderRadius: '8px', cursor: 'pointer' },
-    numberInput: { padding: '10px 14px', border: '2px solid #e0e0e0', borderRadius: '8px', fontSize: '15px', width: '200px' },
-    hint: { fontSize: '12px', color: '#999' },
-    uploadMsg: { padding: '12px 16px', borderRadius: '8px', fontSize: '14px' },
+    label: { fontSize: '13px', fontWeight: '600', color: '#333' },
+    input: { padding: '10px 14px', borderRadius: '8px', border: '2px solid #e0e0e0', fontSize: '14px', fontFamily: 'inherit' },
+    grid2: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' },
     submitBtn: {
-        padding: '14px', background: '#1a237e', color: '#fff',
-        border: 'none', borderRadius: '10px', fontSize: '16px',
-        fontWeight: '700', cursor: 'pointer',
+        padding: '12px 24px', background: '#1a237e', color: '#fff',
+        border: 'none', borderRadius: '8px', fontSize: '15px',
+        fontWeight: '600', cursor: 'pointer', fontFamily: 'inherit',
     },
-    historyCard: { borderRadius: '10px', padding: '18px', marginBottom: '14px', cursor: 'pointer', boxShadow: '0 1px 4px rgba(0,0,0,0.06)' },
-    historyHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' },
-    breakdown: { marginTop: '16px', paddingTop: '16px', borderTop: '1px solid rgba(0,0,0,0.08)' },
-    barRow: { display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '10px' },
-    barLabel: { fontSize: '13px', color: '#555', width: '180px', flexShrink: 0 },
-    barTrack: { flex: 1, height: '8px', background: 'rgba(0,0,0,0.08)', borderRadius: '4px', overflow: 'hidden' },
-    barFill: { height: '100%', borderRadius: '4px' },
-    barScore: { fontSize: '13px', fontWeight: '600', color: '#333', width: '40px', textAlign: 'right' },
-    profileCard: { background: '#fff', borderRadius: '12px', padding: '28px', boxShadow: '0 2px 8px rgba(0,0,0,0.06)' },
-    row: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '16px' },
-    input: { padding: '10px 14px', border: '2px solid #e0e0e0', borderRadius: '8px', fontSize: '14px', fontFamily: 'Segoe UI, sans-serif' },
-    divider: { height: '1px', background: '#e0e0e0', margin: '24px 0' },
-    passwordTitle: { fontSize: '15px', fontWeight: '700', color: '#333', margin: '0 0 16px 0' },
-    refBox: { background: '#f8f9ff', borderRadius: '8px', padding: '16px', border: '1px solid #e8eaf6' },
-    refLabel: { fontSize: '12px', color: '#999', margin: '0 0 4px 0', textTransform: 'uppercase' },
-    refValue: { fontSize: '20px', fontWeight: '800', color: '#1a237e', margin: '0 0 8px 0' },
-    refHint: { fontSize: '13px', color: '#666', margin: 0 },
+    submitBtnDisabled: {
+        padding: '12px 24px', background: '#9e9e9e', color: '#fff',
+        border: 'none', borderRadius: '8px', fontSize: '15px',
+        fontWeight: '600', cursor: 'not-allowed', fontFamily: 'inherit',
+    },
+    spinner: {
+        width: '14px', height: '14px', border: '2px solid rgba(255,255,255,0.3)',
+        borderTopColor: '#fff', borderRadius: '50%',
+        animation: 'spin 0.8s linear infinite', display: 'inline-block',
+    },
+    loadingPage: { padding: '40px 20px', maxWidth: '600px', margin: '0 auto' },
 };

@@ -4,12 +4,12 @@ Researcher: Nziza Aime Octave | UOK BBIT 2026
 """
 
 from django.test import TestCase, Client
-from django.urls import reverse
 from django.contrib.auth import get_user_model
 from rest_framework_simplejwt.tokens import RefreshToken
 from scoring.models import Institution, Applicant, ScoreRecord, ScoringRule, BatchSession
 from scoring.engine import CreditScoringEngine, ScoreResult
 from scoring.ingestion import extract_indicators, DataIngestionError
+from datetime import datetime, timedelta
 import tempfile
 import os
 import json
@@ -64,63 +64,36 @@ class ScoringEngineTests(BaseTestCase):
 
     def setUp(self):
         super().setUp()
-        self.engine = CreditScoringEngine()
-        # Pre-load rules with correct indicator names matching the engine
-        ScoringRule.objects.create(
-            indicator='txn_frequency',
-            condition_label='>= 20 txns/month',
-            min_value=20.0,
-            max_value=999.0,
-            points_awarded=25,
-            max_points=25,
-            is_active=True
-        )
-        ScoringRule.objects.create(
-            indicator='avg_txn_value',
-            condition_label='>= 50,000 RWF',
-            min_value=50000.0,
-            max_value=999999999.0,
-            points_awarded=20,
-            max_points=20,
-            is_active=True
-        )
-        ScoringRule.objects.create(
-            indicator='savings_months',
-            condition_label='6 months',
-            min_value=6.0,
-            max_value=6.0,
-            points_awarded=20,
-            max_points=20,
-            is_active=True
-        )
-        ScoringRule.objects.create(
-            indicator='bill_payment_months',
-            condition_label='6 months',
-            min_value=6.0,
-            max_value=6.0,
-            points_awarded=15,
-            max_points=15,
-            is_active=True
-        )
-        ScoringRule.objects.create(
-            indicator='network_diversity',
-            condition_label='>= 10 counterparties',
-            min_value=10.0,
-            max_value=999.0,
-            points_awarded=10,
-            max_points=10,
-            is_active=True
-        )
-        ScoringRule.objects.create(
-            indicator='account_age_months',
-            condition_label='>= 24 months',
-            min_value=24.0,
-            max_value=999.0,
-            points_awarded=10,
-            max_points=10,
-            is_active=True
-        )
-        # Reload engine to pick up new rules
+        # Full rule set with ranges
+        rules_data = [
+            ('txn_frequency', '>= 20', 20.0, 999.0, 25, 25),
+            ('txn_frequency', '10-19', 10.0, 19.0, 15, 25),
+            ('txn_frequency', '5-9', 5.0, 9.0, 10, 25),
+            ('txn_frequency', '1-4', 1.0, 4.0, 5, 25),
+            ('avg_txn_value', '>= 50k', 50000.0, 999999999.0, 20, 20),
+            ('avg_txn_value', '25k-49k', 25000.0, 49999.0, 15, 20),
+            ('avg_txn_value', '10k-24k', 10000.0, 24999.0, 10, 20),
+            ('avg_txn_value', '1-9k', 1.0, 9999.0, 5, 20),
+            ('savings_months', '6 months', 6.0, 999.0, 20, 20),
+            ('savings_months', '3-5 months', 3.0, 5.0, 12, 20),
+            ('savings_months', '1-2 months', 1.0, 2.0, 5, 20),
+            ('bill_payment_months', '6 months', 6.0, 999.0, 15, 15),
+            ('bill_payment_months', '3-5 months', 3.0, 5.0, 9, 15),
+            ('bill_payment_months', '1-2 months', 1.0, 2.0, 4, 15),
+            ('network_diversity', '>= 10', 10.0, 999.0, 10, 10),
+            ('network_diversity', '5-9', 5.0, 9.0, 7, 10),
+            ('network_diversity', '1-4', 1.0, 4.0, 5, 10),
+            ('account_age_months', '>= 24', 24.0, 999.0, 10, 10),
+            ('account_age_months', '12-23', 12.0, 23.0, 7, 10),
+            ('account_age_months', '6-11', 6.0, 11.0, 5, 10),
+            ('account_age_months', '1-5', 1.0, 5.0, 3, 10),
+        ]
+        for indicator, label, min_v, max_v, points, max_p in rules_data:
+            ScoringRule.objects.create(
+                indicator=indicator, condition_label=label,
+                min_value=min_v, max_value=max_v,
+                points_awarded=points, max_points=max_p, is_active=True
+            )
         self.engine = CreditScoringEngine()
 
     def test_perfect_applicant_score(self):
@@ -156,16 +129,16 @@ class ScoringEngineTests(BaseTestCase):
     def test_boundary_low_medium(self):
         """Test exact boundary between low and medium risk."""
         indicators = {
-            'txn_frequency': 10.0,
-            'avg_txn_value': 25000.0,
+            'txn_frequency': 15.0,
+            'avg_txn_value': 30000.0,
             'savings_months': 3,
             'bill_payment_months': 3,
-            'network_diversity': 5,
-            'account_age_months': 12
+            'network_diversity': 7,
+            'account_age_months': 18
         }
         result = self.engine.compute_score(indicators)
-        self.assertEqual(result.csi_total, 55)
-        self.assertEqual(result.risk_tier, 'good')
+        self.assertEqual(result.csi_total, 65)
+        self.assertEqual(result.risk_tier, 'fair')
 
     def test_negative_indicator_rejection(self):
         """Test that negative values raise ValueError."""
@@ -225,13 +198,19 @@ class DataIngestionTests(BaseTestCase):
 
     def test_valid_csv_parsing(self):
         """Test parsing of valid CSV transaction file."""
-        csv_content = "transaction_date,transaction_type,amount_rwf,counterparty_id,is_savings,is_bill_payment\n2024-01-01,transfer,50000,250788654321,0,0\n2024-01-02,payment,25000,MERCHANT001,0,1"
+        today = datetime.now().strftime('%Y-%m-%d')
+        yesterday = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
+        csv_content = (
+            "transaction_date,transaction_type,amount_rwf,counterparty_id,is_savings,is_bill_payment\n"
+            f"{yesterday},transfer,50000,250788654321,0,0\n"
+            f"{today},payment,25000,MERCHANT001,0,1"
+        )
         with tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False) as f:
             f.write(csv_content)
             tmp_path = f.name
         try:
             indicators = extract_indicators(tmp_path, account_age_months=12)
-            self.assertEqual(indicators['txn_frequency'], 2)
+            self.assertEqual(indicators['txn_frequency'], 2.0)
             self.assertEqual(indicators['avg_txn_value'], 37500.0)
         finally:
             os.unlink(tmp_path)
@@ -301,11 +280,12 @@ class APIAuthenticationTests(BaseTestCase):
             'first_name': 'New',
             'last_name': 'Applicant',
             'email': 'new@example.com',
-            'phone_number': '250788999999'
+            'phone_number': '250788999999',
+            'national_id': '1199780012345678'
         }, content_type='application/json')
         self.assertEqual(response.status_code, 201)
-        self.assertEqual(response.json()['role'], 'applicant')
-        # Verify user was created
+        data = response.json()
+        self.assertEqual(data['role'], 'applicant')
         user = User.objects.get(username='new_applicant')
         self.assertEqual(user.role, 'applicant')
 
@@ -316,11 +296,14 @@ class APIAuthenticationTests(BaseTestCase):
             'password': 'SecurePass123!',
             'password_confirm': 'SecurePass123!',
             'first_name': 'Hacker',
-            'last_name': '',
-            'role': 'admin'  # Attempt to escalate
+            'last_name': 'User',
+            'email': 'hacker@example.com', 
+            'phone_number': '250788999999',  
+            'national_id': '1199780087654321',
+            'role': 'admin'
         }, content_type='application/json')
+        
         self.assertEqual(response.status_code, 201)
-        # Role should be forced to applicant
         user = User.objects.get(username='hacker')
         self.assertEqual(user.role, 'applicant')
 
@@ -354,7 +337,7 @@ class APIAuthenticationTests(BaseTestCase):
         client = self.auth_client(self.admin)
         response = client.get('/api/users/')
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(len(response.json()), 3)  # admin, officer, applicant
+        self.assertEqual(len(response.json()), 3)
 
     def test_non_admin_cannot_list_users(self):
         """Test that loan officers cannot list all users."""
@@ -368,36 +351,49 @@ class ScoringAPITests(BaseTestCase):
 
     def setUp(self):
         super().setUp()
-        # Create scoring rules
-        ScoringRule.objects.create(
-            indicator='txn_frequency', condition_label='>= 20',
-            min_value=20.0, max_value=999.0, points_awarded=25, max_points=25, is_active=True
-        )
-        ScoringRule.objects.create(
-            indicator='avg_txn_value', condition_label='>= 50k',
-            min_value=50000.0, max_value=999999999.0, points_awarded=20, max_points=20, is_active=True
-        )
-        ScoringRule.objects.create(
-            indicator='savings_months', condition_label='6 months',
-            min_value=6.0, max_value=6.0, points_awarded=20, max_points=20, is_active=True
-        )
-        ScoringRule.objects.create(
-            indicator='bill_payment_months', condition_label='6 months',
-            min_value=6.0, max_value=6.0, points_awarded=15, max_points=15, is_active=True
-        )
-        ScoringRule.objects.create(
-            indicator='network_diversity', condition_label='>= 10',
-            min_value=10.0, max_value=999.0, points_awarded=10, max_points=10, is_active=True
-        )
-        ScoringRule.objects.create(
-            indicator='account_age_months', condition_label='>= 24',
-            min_value=24.0, max_value=999.0, points_awarded=10, max_points=10, is_active=True
-        )
+        rules_data = [
+            ('txn_frequency', '>= 20', 20.0, 999.0, 25, 25),
+            ('avg_txn_value', '>= 50k', 50000.0, 999999999.0, 20, 20),
+            ('savings_months', '6 months', 6.0, 999.0, 20, 20),
+            ('savings_months', '3-5 months', 3.0, 5.0, 12, 20),
+            ('bill_payment_months', '6 months', 6.0, 999.0, 15, 15),
+            ('bill_payment_months', '3-5 months', 3.0, 5.0, 9, 15),
+            ('network_diversity', '>= 10', 10.0, 999.0, 10, 10),
+            ('network_diversity', '5-9', 5.0, 9.0, 7, 10),
+            ('account_age_months', '>= 24', 24.0, 999.0, 10, 10),
+            ('account_age_months', '12-23', 12.0, 23.0, 7, 10),
+        ]
+        for indicator, label, min_v, max_v, points, max_p in rules_data:
+            ScoringRule.objects.create(
+                indicator=indicator, condition_label=label,
+                min_value=min_v, max_value=max_v,
+                points_awarded=points, max_points=max_p, is_active=True
+            )
+
+    def _make_csv(self, with_applicant_ref=False):
+        """Helper to generate test CSV content."""
+        today = datetime.now().strftime('%Y-%m-%d')
+        yesterday = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
+        cols = "transaction_date,transaction_type,amount_rwf,counterparty_id,is_savings,is_bill_payment"
+        if with_applicant_ref:
+            cols += ",applicant_ref"
+            rows = (
+                f"\n{yesterday},transfer,50000,250788654321,0,0,APP-001"
+                f"\n{today},payment,75000,MERCHANT001,0,1,APP-001"
+                f"\n{yesterday},transfer,30000,250788111111,0,0,APP-002"
+                f"\n{today},payment,20000,MERCHANT002,1,0,APP-002"
+            )
+        else:
+            rows = (
+                f"\n{yesterday},transfer,50000,250788654321,0,0"
+                f"\n{today},payment,25000,MERCHANT001,0,1"
+            )
+        return cols + rows
 
     def test_individual_scoring_success(self):
         """Test successful individual scoring."""
         client = self.auth_client(self.loan_officer)
-        csv_content = "transaction_date,transaction_type,amount_rwf,counterparty_id,is_savings,is_bill_payment\n2024-01-01,transfer,50000,250788654321,0,0\n2024-01-02,payment,75000,MERCHANT001,0,1"
+        csv_content = self._make_csv()
         with tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False) as f:
             f.write(csv_content)
             tmp_path = f.name
@@ -457,7 +453,7 @@ class ScoringAPITests(BaseTestCase):
     def test_batch_scoring_success(self):
         """Test successful batch scoring."""
         client = self.auth_client(self.loan_officer)
-        csv_content = "transaction_date,transaction_type,amount_rwf,counterparty_id,is_savings,is_bill_payment\n2024-01-01,transfer,50000,250788654321,0,0\n2024-01-02,payment,75000,MERCHANT001,0,1"
+        csv_content = self._make_csv(with_applicant_ref=True)
         with tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False) as f:
             f.write(csv_content)
             tmp_path = f.name
@@ -481,7 +477,6 @@ class FairnessTests(BaseTestCase):
 
     def setUp(self):
         super().setUp()
-        # Create rules
         for indicator, points in [
             ('txn_frequency', 25), ('avg_txn_value', 20),
             ('savings_months', 20), ('bill_payment_months', 15),

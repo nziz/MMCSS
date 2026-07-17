@@ -36,7 +36,6 @@ class UserSerializer(serializers.ModelSerializer):
 
 
 class UserRegistrationSerializer(serializers.ModelSerializer):
-    """Serializer for user registration with password confirmation."""
     password = serializers.CharField(
         write_only=True, required=True, validators=[validate_password]
     )
@@ -52,7 +51,6 @@ class UserRegistrationSerializer(serializers.ModelSerializer):
     def validate(self, attrs):
         if attrs['password'] != attrs['password_confirm']:
             raise serializers.ValidationError({"password": "Password fields didn't match."})
-        # Force role to applicant for self-registration
         if 'role' in attrs and attrs['role'] != 'applicant':
             attrs['role'] = 'applicant'
         return attrs
@@ -64,7 +62,6 @@ class UserRegistrationSerializer(serializers.ModelSerializer):
 
 
 class UserUpdateSerializer(serializers.ModelSerializer):
-    """Serializer for updating user profile (no password change)."""
     class Meta:
         model = User
         fields = ['first_name', 'last_name', 'email', 'phone_number', 'institution']

@@ -3,6 +3,19 @@ Django Settings
 Rule-Based Mobile Money Credit Scoring System
 Researcher: Nziza Aime Octave | UOK BBIT 2026
 """
+INSTALLED_APPS = [
+    
+    'corsheaders',  
+    
+]
+
+MIDDLEWARE = [
+    'corsheaders.middleware.CorsMiddleware',  # <-- ADD THIS FIRST
+    'django.middleware.security.SecurityMiddleware',
+    'django.contrib.sessions.middleware.SessionMiddleware',
+    'django.middleware.common.CommonMiddleware',
+    ...
+]
 
 from pathlib import Path
 from datetime import timedelta
@@ -17,11 +30,8 @@ DEBUG = config('DEBUG', default=False, cast=bool)
 
 ALLOWED_HOSTS = ['*']
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# INSTALLED_APPS — ORDER MATTERS: contenttypes MUST come before auth and admin
-# ═══════════════════════════════════════════════════════════════════════════════
 INSTALLED_APPS = [
-    'django.contrib.contenttypes',   # ← MUST BE FIRST (before auth and admin)
+    'django.contrib.contenttypes',
     'django.contrib.auth',
     'django.contrib.admin',
     'django.contrib.sessions',
@@ -65,9 +75,6 @@ TEMPLATES = [
 
 WSGI_APPLICATION = 'mmcss_backend.wsgi.application'
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# DATABASE — Use environment variables, fall back to local PostgreSQL
-# ═══════════════════════════════════════════════════════════════════════════════
 DATABASE_URL = config('DATABASE_URL', default=None)
 if DATABASE_URL:
     DATABASES = {
@@ -103,22 +110,13 @@ STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# CUSTOM USER MODEL
-# ═══════════════════════════════════════════════════════════════════════════════
 AUTH_USER_MODEL = 'scoring.User'
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# PASSWORD HASHERS — BCrypt primary, PBKDF2 fallback
-# ═══════════════════════════════════════════════════════════════════════════════
 PASSWORD_HASHERS = [
     'django.contrib.auth.hashers.BCryptSHA256PasswordHasher',
     'django.contrib.auth.hashers.PBKDF2PasswordHasher',
 ]
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# DJANGO REST FRAMEWORK — Authentication + Throttling (rate limiting)
-# ═══════════════════════════════════════════════════════════════════════════════
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': (
         'rest_framework_simplejwt.authentication.JWTAuthentication',
@@ -136,15 +134,14 @@ REST_FRAMEWORK = {
     },
 }
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# SIMPLE JWT — Token configuration
-# ═══════════════════════════════════════════════════════════════════════════════
 SIMPLE_JWT = {
     'ACCESS_TOKEN_LIFETIME': timedelta(hours=8),
     'REFRESH_TOKEN_LIFETIME': timedelta(days=1),
 }
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# CORS — Allow all origins for development (restrict in production)
-# ═══════════════════════════════════════════════════════════════════════════════
 CORS_ALLOW_ALL_ORIGINS = True
+CORS_ALLOWED_ORIGINS = [
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+]
+CORS_ALLOW_CREDENTIALS = True

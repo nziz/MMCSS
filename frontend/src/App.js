@@ -1,175 +1,178 @@
-import React, { useState, useEffect } from 'react';
-import Login from './pages/Login';
-import Dashboard from './pages/Dashboard';
-import ScoreIndividual from './pages/ScoreIndividual';
-import ScoreHistory from './pages/ScoreHistory';
-import ScoreBatch from './pages/ScoreBatch';
-import ApplicantHistory from './pages/ApplicantHistory';
-import AdminPanel from './pages/AdminPanel';
-import UserManagement from './pages/UserManagement';
-import ApplicantPortal from './pages/ApplicantPortal';
-import ApplicantRegister from './pages/ApplicantRegister';
-import { getProfile } from './services/api';
+import React, { useState, useEffect, useCallback, Suspense, lazy } from 'react';
+import './App.css';
+import { ToastContainer, useToast } from './hooks/useToast';
+
+// Lazy load pages
+const Login = lazy(() => import('./pages/Login'));
+const ApplicantRegister = lazy(() => import('./pages/ApplicantRegister'));
+const Dashboard = lazy(() => import('./pages/Dashboard'));
+const ScoreIndividual = lazy(() => import('./pages/ScoreIndividual'));
+const ScoreBatch = lazy(() => import('./pages/ScoreBatch'));
+const ScoreHistory = lazy(() => import('./pages/ScoreHistory'));
+const ApplicantHistory = lazy(() => import('./pages/ApplicantHistory'));
+const UserManagement = lazy(() => import('./pages/UserManagement'));
+const AdminPanel = lazy(() => import('./pages/AdminPanel'));
+
+function PageLoader() {
+    return (
+        <div style={{display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',minHeight:'60vh'}}>
+            <div style={{width:'40px',height:'40px',border:'3px solid #e0e0e0',borderTopColor:'#1a237e',borderRadius:'50%',animation:'spin 0.8s linear infinite'}} />
+            <p style={{color:'#666',fontSize:'14px',marginTop:'16px'}}>Loading...</p>
+        </div>
+    );
+}
 
 export default function App() {
-    const [loggedIn, setLoggedIn] = useState(!!localStorage.getItem('access_token'));
     const [user, setUser] = useState(null);
-    const [page, setPage] = useState('dashboard');
+    const [page, setPage] = useState('login');
     const [menuOpen, setMenuOpen] = useState(false);
-    const [showRegister, setShowRegister] = useState(false);
-    const [loadingUser, setLoadingUser] = useState(true);
+    const [isMobile, setIsMobile] = useState(window.innerWidth <= 768);
+    const [authChecked, setAuthChecked] = useState(false);
+    const { toasts, addToast, removeToast } = useToast();
+
+    // Check auth on mount — just check if token exists
+    useEffect(() => {
+        const token = localStorage.getItem('access_token');
+        if (!token) {
+            setAuthChecked(true);
+            return;
+        }
+        // Token exists but we can't verify without calling backend
+        // For now, assume it's valid and let API calls handle 401
+        setAuthChecked(true);
+    }, []);
 
     useEffect(() => {
-        if (loggedIn) {
-            setLoadingUser(true);
-            getProfile()
-                .then(res => setUser(res.data))
-                .catch(() => {
-                    localStorage.removeItem('access_token');
-                    setLoggedIn(false);
-                })
-                .finally(() => setLoadingUser(false));
-        } else {
-            setLoadingUser(false);
-        }
-    }, [loggedIn]);
+        const handleResize = () => setIsMobile(window.innerWidth <= 768);
+        window.addEventListener('resize', handleResize);
+        return () => window.removeEventListener('resize', handleResize);
+    }, []);
 
-    const handleLogout = () => {
+    const handleLogin = useCallback((userData) => {
+        console.log('[App] Login successful, user:', userData);
+        setUser(userData);
+        setPage('dashboard');
+        addToast('Welcome back!', 'success');
+    }, [addToast]);
+
+    const handleLogout = useCallback(() => {
         localStorage.removeItem('access_token');
         localStorage.removeItem('refresh_token');
-        setLoggedIn(false);
         setUser(null);
-        setPage('dashboard');
-        setShowRegister(false);
-    };
+        setPage('login');
+        addToast('Logged out', 'info');
+    }, [addToast]);
 
-    // Not logged in — show login or register
-    if (!loggedIn) {
-        if (showRegister) {
-            return <ApplicantRegister onBackToLogin={() => setShowRegister(false)} />;
-        }
-        return (
-            <Login
-                onLogin={() => setLoggedIn(true)}
-                onRegister={() => setShowRegister(true)}
-            />
-        );
-    }
-
-    // Loading user profile
-    if (loadingUser) {
-        return (
-            <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#f5f6fa' }}>
-                <p style={{ color: '#1a237e', fontSize: '18px' }}>Loading...</p>
-            </div>
-        );
-    }
-
-    // Applicant role — show applicant portal only
-    if (user?.role === 'applicant') {
-        return <ApplicantPortal user={user} onLogout={handleLogout} />;
-    }
-
-    // Staff roles — show full system
     const navItems = [
-        { key: 'dashboard', label: '📊 Dashboard' },
-        { key: 'score', label: '👤 Score Individual' },
-        { key: 'batch', label: '👥 Batch Scoring' },
-        { key: 'history', label: '📋 Score History' },
-        { key: 'applicant', label: '🔍 Applicant History' },
-        ...(user?.role === 'admin' ? [{ key: 'admin', label: '⚙️ Admin Panel' }] : []),
-        ...(user?.role === 'admin' ? [
-    { key: 'users', label: '👥 User Management' },
-    { key: 'admin', label: '⚙️ Admin Panel' }
-] : []),
+        { key: 'dashboard', label: '📊 Dashboard', roles: ['admin','loan_officer','branch_manager','auditor'] },
+        { key: 'score', label: '👤 Score Individual', roles: ['admin','loan_officer','branch_manager'] },
+        { key: 'batch', label: '👥 Batch Scoring', roles: ['admin','loan_officer','branch_manager'] },
+        { key: 'history', label: '📋 Score History', roles: ['admin','loan_officer','branch_manager','auditor'] },
+        { key: 'applicant', label: '🔍 Applicant History', roles: ['admin','loan_officer','branch_manager','auditor'] },
+        { key: 'users', label: '👥 User Management', roles: ['admin'] },
+        { key: 'admin', label: '⚙️ Admin Panel', roles: ['admin'] },
     ];
 
-    return (
-        <div style={styles.app}>
-            {/* Mobile Top Bar */}
-            <div style={styles.mobileTopBar}>
-                <button style={styles.hamburger} onClick={() => setMenuOpen(!menuOpen)}>
-                    {menuOpen ? '✕' : '☰'}
-                </button>
-                <span style={styles.mobileTitle}>MMCSS</span>
-                <button style={styles.mobileLogout} onClick={handleLogout}>Logout</button>
-            </div>
+    const visibleNav = navItems.filter(item => item.roles.includes(user?.role));
 
-            {/* Sidebar */}
-            <div style={{
-                ...styles.sidebar,
-                transform: menuOpen ? 'translateX(0)' : undefined,
-            }}>
-                <div style={styles.logo}>
-                    <h2 style={styles.logoText}>MMCSS</h2>
-                    <p style={styles.logoSub}>Mobile Money Credit Scoring</p>
+    const renderPage = () => {
+        const props = { user, onLogout: handleLogout, addToast };
+        switch (page) {
+            case 'login': return <Login onLogin={handleLogin} onRegister={() => setPage('register')} />;
+            case 'register': return <ApplicantRegister onBackToLogin={() => setPage('login')} addToast={addToast} />;
+            case 'dashboard': return <Dashboard {...props} />;
+            case 'score': return <ScoreIndividual {...props} />;
+            case 'batch': return <ScoreBatch {...props} />;
+            case 'history': return <ScoreHistory {...props} />;
+            case 'applicant': return <ApplicantHistory {...props} />;
+            case 'users': return <UserManagement {...props} />;
+            case 'admin': return <AdminPanel {...props} />;
+            default: return <Dashboard {...props} />;
+        }
+    };
+
+    if (!authChecked) {
+        return (
+            <div style={{minHeight:'100vh',display:'flex',alignItems:'center',justifyContent:'center',background:'#f5f6fa'}}>
+                <PageLoader />
+            </div>
+        );
+    }
+
+    if (!user) {
+        return (
+            <Suspense fallback={<PageLoader />}>
+                <ToastContainer toasts={toasts} removeToast={removeToast} />
+                {renderPage()}
+            </Suspense>
+        );
+    }
+
+    return (
+        <div style={{display:'flex',minHeight:'100vh'}}>
+            <ToastContainer toasts={toasts} removeToast={removeToast} />
+
+            {isMobile && (
+                <div style={{position:'fixed',top:0,left:0,right:0,height:'56px',background:'#1a237e',display:'flex',alignItems:'center',justifyContent:'space-between',padding:'0 16px',zIndex:1100}}>
+                    <button style={{background:'none',border:'none',color:'#fff',fontSize:'22px',cursor:'pointer'}} onClick={() => setMenuOpen(!menuOpen)}>
+                        {menuOpen ? '✕' : '☰'}
+                    </button>
+                    <span style={{color:'#fff',fontSize:'18px',fontWeight:'700'}}>MMCSS</span>
+                    <div style={{width:'40px'}} />
                 </div>
-                <nav style={styles.nav}>
-                    {navItems.map(item => (
-                        <button
-                            key={item.key}
-                            style={page === item.key ? styles.navActive : styles.navItem}
-                            onClick={() => { setPage(item.key); setMenuOpen(false); }}
+            )}
+
+            <aside style={{
+                width:'240px', background:'#1a237e', color:'#fff',
+                position:'fixed', top:0, left:0, bottom:0,
+                display:'flex', flexDirection:'column', zIndex:1200,
+                transform: isMobile ? (menuOpen ? 'translateX(0)' : 'translateX(-100%)') : 'translateX(0)',
+                transition: 'transform 0.3s ease',
+            }}>
+                <div style={{padding:'24px 20px', borderBottom:'1px solid rgba(255,255,255,0.1)'}}>
+                    <h1 style={{fontSize:'24px',fontWeight:'800',margin:'0 0 4px 0'}}>MMCSS</h1>
+                    <p style={{fontSize:'11px',opacity:0.7,margin:0}}>Credit Scoring</p>
+                </div>
+
+                <nav style={{flex:1,padding:'16px 12px',display:'flex',flexDirection:'column',gap:'4px',overflowY:'auto'}}>
+                    {visibleNav.map(item => (
+                        <button key={item.key}
+                            style={page === item.key 
+                                ? {padding:'12px 16px',borderRadius:'8px',textAlign:'left',background:'rgba(255,255,255,0.15)',border:'none',color:'#fff',fontSize:'14px',fontWeight:'600',cursor:'pointer',fontFamily:'inherit'}
+                                : {padding:'12px 16px',borderRadius:'8px',textAlign:'left',background:'none',border:'none',color:'rgba(255,255,255,0.85)',fontSize:'14px',fontWeight:'500',cursor:'pointer',transition:'all 0.2s',fontFamily:'inherit'}
+                            }
+                            onClick={() => { setPage(item.key); if (isMobile) setMenuOpen(false); }}
                         >
                             {item.label}
                         </button>
                     ))}
                 </nav>
-                <div style={styles.userBox}>
-                    <div style={styles.userAvatar}>
-                        {user?.first_name?.charAt(0) || user?.username?.charAt(0) || 'U'}
+
+                <div style={{padding:'16px',borderTop:'1px solid rgba(255,255,255,0.1)'}}>
+                    <div style={{display:'flex',alignItems:'center',gap:'10px',marginBottom:'12px'}}>
+                        <div style={{width:'36px',height:'36px',borderRadius:'50%',background:'rgba(255,255,255,0.2)',display:'flex',alignItems:'center',justifyContent:'center',fontSize:'14px',fontWeight:'700'}}>
+                            {(user.first_name?.[0] || user.username?.[0] || '?').toUpperCase()}
+                        </div>
+                        <div>
+                            <p style={{fontSize:'13px',fontWeight:'600',margin:'0 0 2px 0'}}>{user.first_name} {user.last_name}</p>
+                            <p style={{fontSize:'11px',opacity:0.6,margin:0,textTransform:'capitalize'}}>{user.role?.replace('_',' ')}</p>
+                        </div>
                     </div>
-                    <div>
-                        <p style={styles.userName}>{user?.first_name} {user?.last_name}</p>
-                        <p style={styles.userRole}>{user?.role?.replace('_', ' ')}</p>
-                        {user?.institution_name && (
-                            <p style={styles.userInstitution}>{user.institution_name}</p>
-                        )}
-                    </div>
-                    <button style={styles.logout} onClick={handleLogout}>Logout</button>
+                    <button style={{width:'100%',padding:'10px',background:'rgba(255,255,255,0.1)',border:'1px solid rgba(255,255,255,0.2)',borderRadius:'8px',color:'#fff',fontSize:'13px',cursor:'pointer',fontFamily:'inherit'}} onClick={handleLogout}>
+                        🚪 Logout
+                    </button>
                 </div>
-            </div>
+            </aside>
 
-            {/* Mobile Overlay */}
-            {menuOpen && <div style={styles.overlay} onClick={() => setMenuOpen(false)} />}
+            {isMobile && menuOpen && (
+                <div style={{position:'fixed',top:0,left:0,right:0,bottom:0,background:'rgba(0,0,0,0.5)',zIndex:1150}} onClick={() => setMenuOpen(false)} />
+            )}
 
-            {/* Main Content */}
-            <div style={styles.main}>
-                {page === 'dashboard' && <Dashboard />}
-                {page === 'score'     && <ScoreIndividual />}
-                {page === 'batch'     && <ScoreBatch />}
-                {page === 'history'   && <ScoreHistory />}
-                {page === 'applicant' && <ApplicantHistory />}
-                {page === 'admin'     && user?.role === 'admin' && <AdminPanel />}
-                {page === 'users' && user?.role === 'admin' && <UserManagement />}
-            </div>
+            <main style={{flex:1,background:'#f5f6fa',minHeight:'100vh',marginLeft:isMobile?0:'240px',paddingTop:isMobile?'56px':'20px',padding:'20px',transition:'margin-left 0.3s ease'}}>
+                <Suspense fallback={<PageLoader />}>
+                    {renderPage()}
+                </Suspense>
+            </main>
         </div>
     );
 }
-
-const styles = {
-    app: { display: 'flex', minHeight: '100vh', fontFamily: 'Segoe UI, sans-serif', background: '#f5f6fa' },
-    mobileTopBar: {
-        display: 'none', position: 'fixed', top: 0, left: 0, right: 0,
-        height: '56px', background: '#1a237e', zIndex: 1000,
-        alignItems: 'center', justifyContent: 'space-between', padding: '0 16px',
-    },
-    hamburger: { background: 'none', border: 'none', color: '#fff', fontSize: '22px', cursor: 'pointer' },
-    mobileTitle: { color: '#fff', fontWeight: '800', fontSize: '18px' },
-    mobileLogout: { background: 'rgba(255,255,255,0.15)', border: 'none', color: '#fff', padding: '6px 12px', borderRadius: '6px', cursor: 'pointer', fontSize: '13px' },
-    sidebar: { width: '240px', background: '#1a237e', display: 'flex', flexDirection: 'column', position: 'fixed', height: '100vh', zIndex: 900, overflowY: 'auto', transition: 'transform 0.3s ease' },
-    logo: { padding: '24px 20px', borderBottom: '1px solid rgba(255,255,255,0.1)' },
-    logoText: { color: '#fff', margin: '0', fontSize: '24px', fontWeight: '800' },
-    logoSub: { color: 'rgba(255,255,255,0.6)', margin: '4px 0 0 0', fontSize: '11px' },
-    nav: { flex: 1, padding: '16px 0' },
-    navItem: { width: '100%', padding: '13px 20px', background: 'none', border: 'none', color: 'rgba(255,255,255,0.7)', fontSize: '14px', textAlign: 'left', cursor: 'pointer' },
-    navActive: { width: '100%', padding: '13px 20px', background: 'rgba(255,255,255,0.15)', border: 'none', borderLeft: '4px solid #fff', color: '#fff', fontSize: '14px', fontWeight: '600', textAlign: 'left', cursor: 'pointer' },
-    userBox: { padding: '16px 20px', borderTop: '1px solid rgba(255,255,255,0.1)', display: 'flex', flexDirection: 'column', gap: '6px' },
-    userAvatar: { width: '40px', height: '40px', borderRadius: '50%', background: 'rgba(255,255,255,0.2)', color: '#fff', fontSize: '18px', fontWeight: '700', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '6px' },
-    userName: { color: '#fff', margin: '0', fontSize: '14px', fontWeight: '600' },
-    userRole: { color: 'rgba(255,255,255,0.6)', margin: '0', fontSize: '12px', textTransform: 'capitalize' },
-    userInstitution: { color: 'rgba(255,255,255,0.5)', margin: '0', fontSize: '11px' },
-    logout: { marginTop: '8px', width: '100%', padding: '8px', background: 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.3)', color: '#fff', borderRadius: '6px', cursor: 'pointer', fontSize: '13px' },
-    overlay: { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', zIndex: 800 },
-    main: { marginLeft: '240px', flex: 1, background: '#f5f6fa', minHeight: '100vh' },
-};

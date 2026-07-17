@@ -1,35 +1,26 @@
 import React, { useState, useEffect } from 'react';
-import axios from 'axios';
+import { getInstitutions, registerApplicant, verifyApplicantOtp, resendOtpToken } from '../services/api';
 
-const API = 'http://127.0.0.1:8000/api';
-
-export default function ApplicantRegister({ onBackToLogin }) {
-    const [step, setStep] = useState('register'); // 'register' or 'verify'
+export default function ApplicantRegister({ onBackToLogin, addToast }) {
+    const [step, setStep] = useState('register');
     const [institutions, setInstitutions] = useState([]);
     const [loading, setLoading] = useState(false);
+    const [resendLoading, setResendLoading] = useState(false);
     const [error, setError] = useState('');
     const [success, setSuccess] = useState('');
     const [username, setUsername] = useState('');
 
     const [form, setForm] = useState({
-        username: '',
-        password: '',
-        confirmPassword: '',
-        email: '',
-        full_name: '',
-        phone_number: '',
-        national_id: '',
-        gender: '',
-        district: '',
-        mobile_operator: 'mtn',
-        institution_id: '',
+        username: '', password: '', confirmPassword: '',
+        email: '', full_name: '', phone_number: '',
+        national_id: '', gender: '', district: '',
+        mobile_operator: 'mtn', institution_id: '',
     });
 
     const [otp, setOtp] = useState('');
 
     useEffect(() => {
-        // Load institutions for dropdown
-        axios.get(`${API}/institutions/`)
+        getInstitutions()
             .then(res => setInstitutions(res.data))
             .catch(() => {});
     }, []);
@@ -43,7 +34,6 @@ export default function ApplicantRegister({ onBackToLogin }) {
         e.preventDefault();
         setError('');
 
-        // Client-side validation
         if (form.password !== form.confirmPassword) {
             setError('Passwords do not match.');
             return;
@@ -56,15 +46,35 @@ export default function ApplicantRegister({ onBackToLogin }) {
             setError('National ID is required.');
             return;
         }
+        if (!form.email.trim()) {
+            setError('Email address is required.');
+            return;
+        }
+        if (!form.full_name.trim()) {
+            setError('Full name is required.');
+            return;
+        }
+        if (!form.phone_number.trim()) {
+            setError('Phone number is required.');
+            return;
+        }
 
         setLoading(true);
         try {
-            const res = await axios.post(`${API}/applicant/register/`, form);
+            const res = await registerApplicant(form);
             setUsername(form.username);
-            setSuccess(res.data.message);
+            setSuccess(res.data.message || 'Registration successful! Check your email for OTP.');
             setStep('verify');
+            setOtp('');
+            if (addToast) addToast('Registration successful! Check your email for OTP.', 'success');
         } catch (err) {
-            setError(err.response?.data?.error || 'Registration failed.');
+            const msg = err.response?.data?.error || 
+                       err.response?.data?.detail || 
+                       err.response?.data?.message || 
+                       JSON.stringify(err.response?.data) ||
+                       'Registration failed. Please try again.';
+            setError(msg);
+            if (addToast) addToast(msg, 'error');
         } finally {
             setLoading(false);
         }
@@ -75,17 +85,39 @@ export default function ApplicantRegister({ onBackToLogin }) {
         setError('');
         setLoading(true);
         try {
-            const res = await axios.post(`${API}/applicant/verify/`, {
-                username, otp_code: otp
-            });
-            // Store token and redirect to applicant portal
+            const res = await verifyApplicantOtp(username, otp);
             localStorage.setItem('access_token', res.data.access);
             localStorage.setItem('refresh_token', res.data.refresh);
+            if (addToast) addToast('Account verified successfully!', 'success');
             window.location.reload();
         } catch (err) {
-            setError(err.response?.data?.error || 'Verification failed.');
+            const msg = err.response?.data?.error || 
+                       err.response?.data?.detail || 
+                       err.response?.data?.message ||
+                       'Verification failed. Please check your OTP.';
+            setError(msg);
+            if (addToast) addToast(msg, 'error');
         } finally {
             setLoading(false);
+        }
+    };
+
+    const handleResendOtp = async () => {
+        setResendLoading(true);
+        setError('');
+        try {
+            await resendOtpToken(username);
+            setSuccess('New OTP sent to your email!');
+            if (addToast) addToast('New OTP sent to your email!', 'success');
+        } catch (err) {
+            const msg = err.response?.data?.error || 
+                       err.response?.data?.detail || 
+                       err.response?.data?.message ||
+                       'Failed to resend OTP. Please try again.';
+            setError(msg);
+            if (addToast) addToast(msg, 'error');
+        } finally {
+            setResendLoading(false);
         }
     };
 
@@ -101,7 +133,6 @@ export default function ApplicantRegister({ onBackToLogin }) {
     return (
         <div style={styles.page}>
             <div style={styles.card}>
-                {/* Header */}
                 <div style={styles.header}>
                     <h1 style={styles.logo}>MMCSS</h1>
                     <p style={styles.logoSub}>Mobile Money Credit Scoring System</p>
@@ -110,15 +141,19 @@ export default function ApplicantRegister({ onBackToLogin }) {
                     </h2>
                 </div>
 
-                {error && <div style={styles.error}>{error}</div>}
-                {success && step === 'verify' && (
+                {error && (
+                    <div style={styles.error} role="alert">
+                        <span>❌</span> {error}
+                    </div>
+                )}
+                {success && (
                     <div style={styles.successBox}>{success}</div>
                 )}
 
                 {/* REGISTRATION FORM */}
                 {step === 'register' && (
-                    <form onSubmit={handleRegister} style={styles.form}>
-                        <div style={styles.section}>
+                    <form onSubmit={handleRegister} style={styles.form} noValidate>
+                        <div className="card" style={{ padding: '20px', marginBottom: '16px' }}>
                             <h3 style={styles.sectionTitle}>Account Credentials</h3>
                             <div style={styles.row}>
                                 <div style={styles.field}>
@@ -173,7 +208,7 @@ export default function ApplicantRegister({ onBackToLogin }) {
                             </div>
                         </div>
 
-                        <div style={styles.section}>
+                        <div className="card" style={{ padding: '20px', marginBottom: '16px' }}>
                             <h3 style={styles.sectionTitle}>Personal Information</h3>
                             <div style={styles.row}>
                                 <div style={styles.field}>
@@ -257,7 +292,7 @@ export default function ApplicantRegister({ onBackToLogin }) {
                             </div>
                         </div>
 
-                        <div style={styles.section}>
+                        <div className="card" style={{ padding: '20px', marginBottom: '16px' }}>
                             <h3 style={styles.sectionTitle}>Institution</h3>
                             <div style={styles.field}>
                                 <label style={styles.label}>Select MFI / SACCO</label>
@@ -279,18 +314,19 @@ export default function ApplicantRegister({ onBackToLogin }) {
 
                         <button
                             type="submit"
-                            style={styles.submitBtn}
+                            style={loading ? styles.submitBtnDisabled : styles.submitBtn}
                             disabled={loading}
                         >
-                            {loading ? 'Registering...' : 'Create Account →'}
+                            {loading ? (
+                                <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
+                                    <span style={styles.spinner} /> Registering...
+                                </span>
+                            ) : 'Create Account →'}
                         </button>
 
                         <p style={styles.loginLink}>
                             Already have an account?{' '}
-                            <span
-                                style={styles.link}
-                                onClick={onBackToLogin}
-                            >
+                            <span style={styles.link} onClick={onBackToLogin}>
                                 Login here
                             </span>
                         </p>
@@ -317,21 +353,22 @@ export default function ApplicantRegister({ onBackToLogin }) {
                             />
                             <button
                                 type="submit"
-                                style={styles.submitBtn}
+                                style={loading || otp.length !== 6 ? styles.submitBtnDisabled : styles.submitBtn}
                                 disabled={loading || otp.length !== 6}
                             >
-                                {loading ? 'Verifying...' : '✅ Verify & Activate Account'}
+                                {loading ? (
+                                    <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
+                                        <span style={styles.spinner} /> Verifying...
+                                    </span>
+                                ) : '✅ Verify & Activate Account'}
                             </button>
                             <p style={styles.loginLink}>
                                 Didn't receive code?{' '}
                                 <span
-                                    style={styles.link}
-                                    onClick={async () => {
-                                        await axios.post(`${API}/auth/resend-otp/`, { username });
-                                        setSuccess('New OTP sent to your email!');
-                                    }}
+                                    style={{ ...styles.link, opacity: resendLoading ? 0.5 : 1, pointerEvents: resendLoading ? 'none' : 'auto' }}
+                                    onClick={handleResendOtp}
                                 >
-                                    Resend OTP
+                                    {resendLoading ? 'Sending...' : 'Resend OTP'}
                                 </span>
                             </p>
                         </div>
@@ -353,6 +390,7 @@ const styles = {
         background: '#fff', borderRadius: '16px',
         padding: '40px', width: '100%', maxWidth: '720px',
         boxShadow: '0 20px 60px rgba(0,0,0,0.3)',
+        animation: 'fadeIn 0.4s ease',
     },
     header: { textAlign: 'center', marginBottom: '32px' },
     logo: { fontSize: '32px', fontWeight: '800', color: '#1a237e', margin: '0 0 4px 0' },
@@ -361,16 +399,13 @@ const styles = {
     error: {
         background: '#ffebee', color: '#c62828', padding: '12px 16px',
         borderRadius: '8px', marginBottom: '20px', fontSize: '14px',
+        display: 'flex', alignItems: 'center', gap: '8px',
     },
     successBox: {
         background: '#e8f5e9', color: '#2e7d32', padding: '12px 16px',
         borderRadius: '8px', marginBottom: '20px', fontSize: '14px',
     },
-    form: { display: 'flex', flexDirection: 'column', gap: '20px' },
-    section: {
-        background: '#f8f9ff', borderRadius: '10px',
-        padding: '20px', border: '1px solid #e8eaf6',
-    },
+    form: { display: 'flex', flexDirection: 'column', gap: '0' },
     sectionTitle: {
         fontSize: '14px', fontWeight: '700', color: '#1a237e',
         margin: '0 0 16px 0', textTransform: 'uppercase', letterSpacing: '0.5px',
@@ -381,15 +416,26 @@ const styles = {
     input: {
         padding: '10px 14px', border: '2px solid #e0e0e0',
         borderRadius: '8px', fontSize: '14px',
-        fontFamily: 'Segoe UI, sans-serif',
-        background: '#fff',
+        fontFamily: 'inherit', background: '#fff',
     },
     submitBtn: {
         padding: '14px', background: '#1a237e', color: '#fff',
         border: 'none', borderRadius: '10px', fontSize: '16px',
-        fontWeight: '700', cursor: 'pointer',
+        fontWeight: '700', cursor: 'pointer', fontFamily: 'inherit',
+        marginTop: '8px',
     },
-    loginLink: { textAlign: 'center', fontSize: '14px', color: '#666' },
+    submitBtnDisabled: {
+        padding: '14px', background: '#9e9e9e', color: '#fff',
+        border: 'none', borderRadius: '10px', fontSize: '16px',
+        fontWeight: '700', cursor: 'not-allowed', fontFamily: 'inherit',
+        marginTop: '8px',
+    },
+    spinner: {
+        width: '16px', height: '16px', border: '2px solid rgba(255,255,255,0.3)',
+        borderTopColor: '#fff', borderRadius: '50%',
+        animation: 'spin 0.8s linear infinite', display: 'inline-block',
+    },
+    loginLink: { textAlign: 'center', fontSize: '14px', color: '#666', marginTop: '16px' },
     link: { color: '#1a237e', fontWeight: '700', cursor: 'pointer' },
     otpBox: {
         display: 'flex', flexDirection: 'column',
@@ -401,6 +447,6 @@ const styles = {
         padding: '16px', fontSize: '28px', fontWeight: '700',
         textAlign: 'center', letterSpacing: '8px',
         border: '3px solid #1a237e', borderRadius: '10px',
-        width: '220px',
+        width: '220px', fontFamily: 'inherit',
     },
 };

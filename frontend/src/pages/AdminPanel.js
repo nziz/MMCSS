@@ -1,10 +1,16 @@
 import React, { useState, useEffect } from 'react';
-import axios from 'axios';
+import { getRules, updateRule } from '../services/api';
 
-const API = 'http://127.0.0.1:8000/api';
-const getToken = () => localStorage.getItem('access_token');
+const indicatorColors = {
+    'Transaction Frequency': '#1a237e',
+    'Average Transaction Value': '#1565c0',
+    'Savings Consistency': '#2e7d32',
+    'Bill Payment Regularity': '#f57f17',
+    'Network Diversity': '#6a1b9a',
+    'Account Age': '#00695c',
+};
 
-export default function AdminPanel() {
+export default function AdminPanel({ addToast }) {
     const [rules, setRules] = useState([]);
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(null);
@@ -17,16 +23,16 @@ export default function AdminPanel() {
     useEffect(() => {
         fetchRules();
         fetchStats();
-    }, []);
+    }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
     const fetchRules = async () => {
         try {
-            const res = await axios.get(`${API}/rules/`, {
-                headers: { Authorization: `Bearer ${getToken()}` }
-            });
+            const res = await getRules();
             setRules(res.data);
         } catch (err) {
-            setMessage('Failed to load scoring rules.');
+            const msg = err.response?.data?.detail || 'Failed to load scoring rules.';
+            setMessage(msg);
+            if (addToast) addToast(msg, 'error');
         } finally {
             setLoading(false);
         }
@@ -34,11 +40,13 @@ export default function AdminPanel() {
 
     const fetchStats = async () => {
         try {
-            const res = await axios.get(`${API}/dashboard/stats/`, {
-                headers: { Authorization: `Bearer ${getToken()}` }
-            });
+            // Using the dashboard stats endpoint for now
+            const { getDashboardStats } = await import('../services/api');
+            const res = await getDashboardStats();
             setStats(res.data);
-        } catch (err) {}
+        } catch (err) {
+            // Silently fail — stats are secondary
+        }
     };
 
     const startEdit = (rule) => {
@@ -54,37 +62,26 @@ export default function AdminPanel() {
         setSaving(ruleId);
         setMessage('');
         try {
-            await axios.put(
-                `${API}/rules/${ruleId}/`,
-                editValues,
-                { headers: { Authorization: `Bearer ${getToken()}` } }
-            );
+            await updateRule(ruleId, editValues);
             setMessage('✅ Rule updated successfully!');
             setEditingRule(null);
             fetchRules();
+            if (addToast) addToast('Rule updated successfully!', 'success');
         } catch (err) {
-            setMessage('❌ Failed to update rule. Admin access required.');
+            const msg = err.response?.data?.detail || '❌ Failed to update rule. Admin access required.';
+            setMessage(msg);
+            if (addToast) addToast(msg, 'error');
         } finally {
             setSaving(null);
         }
     };
 
-    // Group rules by indicator
     const groupedRules = rules.reduce((acc, rule) => {
         const key = rule.indicator_display || rule.indicator;
         if (!acc[key]) acc[key] = [];
         acc[key].push(rule);
         return acc;
     }, {});
-
-    const indicatorColors = {
-        'Transaction Frequency': '#1a237e',
-        'Average Transaction Value': '#1565c0',
-        'Savings Consistency': '#2e7d32',
-        'Bill Payment Regularity': '#f57f17',
-        'Network Diversity': '#6a1b9a',
-        'Account Age': '#00695c',
-    };
 
     return (
         <div style={styles.container}>
@@ -126,10 +123,13 @@ export default function AdminPanel() {
                     </div>
 
                     {loading ? (
-                        <div style={styles.loading}>Loading scoring rules...</div>
+                        <div className="card" style={{ padding: '40px', textAlign: 'center' }}>
+                            <div className="skeleton" style={{ width: '60px', height: '60px', borderRadius: '50%', margin: '0 auto 16px' }} />
+                            <div className="skeleton skeleton-text" style={{ width: '200px', margin: '0 auto' }} />
+                        </div>
                     ) : (
                         Object.entries(groupedRules).map(([indicator, indicatorRules]) => (
-                            <div key={indicator} style={styles.ruleGroup}>
+                            <div key={indicator} className="card" style={{ marginBottom: '20px', padding: '0', overflow: 'hidden' }}>
                                 <div style={{
                                     ...styles.ruleGroupHeader,
                                     borderLeft: `5px solid ${indicatorColors[indicator] || '#1a237e'}`,
@@ -140,93 +140,95 @@ export default function AdminPanel() {
                                     </span>
                                 </div>
 
-                                <table style={styles.table}>
-                                    <thead>
-                                        <tr style={styles.tableHead}>
-                                            <th style={styles.th}>Condition</th>
-                                            <th style={styles.th}>Min Value</th>
-                                            <th style={styles.th}>Max Value</th>
-                                            <th style={styles.th}>Points</th>
-                                            <th style={styles.th}>Action</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        {indicatorRules.map(rule => (
-                                            <tr key={rule.id} style={styles.tableRow}>
-                                                <td style={styles.td}>{rule.condition_label}</td>
-                                                <td style={styles.td}>
-                                                    {editingRule === rule.id ? (
-                                                        <input
-                                                            style={styles.editInput}
-                                                            type="number"
-                                                            value={editValues.min_value ?? ''}
-                                                            onChange={e => setEditValues({
-                                                                ...editValues,
-                                                                min_value: e.target.value
-                                                            })}
-                                                        />
-                                                    ) : (rule.min_value ?? '—')}
-                                                </td>
-                                                <td style={styles.td}>
-                                                    {editingRule === rule.id ? (
-                                                        <input
-                                                            style={styles.editInput}
-                                                            type="number"
-                                                            value={editValues.max_value ?? ''}
-                                                            onChange={e => setEditValues({
-                                                                ...editValues,
-                                                                max_value: e.target.value
-                                                            })}
-                                                        />
-                                                    ) : (rule.max_value ?? '—')}
-                                                </td>
-                                                <td style={styles.td}>
-                                                    {editingRule === rule.id ? (
-                                                        <input
-                                                            style={{ ...styles.editInput, width: '60px' }}
-                                                            type="number"
-                                                            value={editValues.points_awarded}
-                                                            onChange={e => setEditValues({
-                                                                ...editValues,
-                                                                points_awarded: e.target.value
-                                                            })}
-                                                        />
-                                                    ) : (
-                                                        <span style={styles.pointsBadge}>
-                                                            {rule.points_awarded} pts
-                                                        </span>
-                                                    )}
-                                                </td>
-                                                <td style={styles.td}>
-                                                    {editingRule === rule.id ? (
-                                                        <div style={{ display: 'flex', gap: '8px' }}>
-                                                            <button
-                                                                style={styles.saveBtn}
-                                                                onClick={() => saveRule(rule.id)}
-                                                                disabled={saving === rule.id}
-                                                            >
-                                                                {saving === rule.id ? '...' : '✅ Save'}
-                                                            </button>
-                                                            <button
-                                                                style={styles.cancelBtn}
-                                                                onClick={() => setEditingRule(null)}
-                                                            >
-                                                                Cancel
-                                                            </button>
-                                                        </div>
-                                                    ) : (
-                                                        <button
-                                                            style={styles.editBtn}
-                                                            onClick={() => startEdit(rule)}
-                                                        >
-                                                            ✏️ Edit
-                                                        </button>
-                                                    )}
-                                                </td>
+                                <div className="table-responsive">
+                                    <table style={styles.table}>
+                                        <thead>
+                                            <tr style={styles.tableHead}>
+                                                <th style={styles.th}>Condition</th>
+                                                <th style={styles.th}>Min Value</th>
+                                                <th style={styles.th}>Max Value</th>
+                                                <th style={styles.th}>Points</th>
+                                                <th style={styles.th}>Action</th>
                                             </tr>
-                                        ))}
-                                    </tbody>
-                                </table>
+                                        </thead>
+                                        <tbody>
+                                            {indicatorRules.map(rule => (
+                                                <tr key={rule.id} style={styles.tableRow}>
+                                                    <td style={styles.td}>{rule.condition_label}</td>
+                                                    <td style={styles.td}>
+                                                        {editingRule === rule.id ? (
+                                                            <input
+                                                                style={styles.editInput}
+                                                                type="number"
+                                                                value={editValues.min_value ?? ''}
+                                                                onChange={e => setEditValues({
+                                                                    ...editValues,
+                                                                    min_value: e.target.value
+                                                                })}
+                                                            />
+                                                        ) : (rule.min_value ?? '—')}
+                                                    </td>
+                                                    <td style={styles.td}>
+                                                        {editingRule === rule.id ? (
+                                                            <input
+                                                                style={styles.editInput}
+                                                                type="number"
+                                                                value={editValues.max_value ?? ''}
+                                                                onChange={e => setEditValues({
+                                                                    ...editValues,
+                                                                    max_value: e.target.value
+                                                                })}
+                                                            />
+                                                        ) : (rule.max_value ?? '—')}
+                                                    </td>
+                                                    <td style={styles.td}>
+                                                        {editingRule === rule.id ? (
+                                                            <input
+                                                                style={{ ...styles.editInput, width: '60px' }}
+                                                                type="number"
+                                                                value={editValues.points_awarded}
+                                                                onChange={e => setEditValues({
+                                                                    ...editValues,
+                                                                    points_awarded: e.target.value
+                                                                })}
+                                                            />
+                                                        ) : (
+                                                            <span style={styles.pointsBadge}>
+                                                                {rule.points_awarded} pts
+                                                            </span>
+                                                        )}
+                                                    </td>
+                                                    <td style={styles.td}>
+                                                        {editingRule === rule.id ? (
+                                                            <div style={{ display: 'flex', gap: '8px' }}>
+                                                                <button
+                                                                    style={styles.saveBtn}
+                                                                    onClick={() => saveRule(rule.id)}
+                                                                    disabled={saving === rule.id}
+                                                                >
+                                                                    {saving === rule.id ? '...' : '✅ Save'}
+                                                                </button>
+                                                                <button
+                                                                    style={styles.cancelBtn}
+                                                                    onClick={() => setEditingRule(null)}
+                                                                >
+                                                                    Cancel
+                                                                </button>
+                                                            </div>
+                                                        ) : (
+                                                            <button
+                                                                style={styles.editBtn}
+                                                                onClick={() => startEdit(rule)}
+                                                            >
+                                                                ✏️ Edit
+                                                            </button>
+                                                        )}
+                                                    </td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
                             </div>
                         ))
                     )}
@@ -243,14 +245,14 @@ export default function AdminPanel() {
                             { label: 'Individual Scorings', value: stats.individual_count, color: '#1565c0' },
                             { label: 'Batch Sessions', value: stats.batch_count, color: '#6a1b9a' },
                         ].map(item => (
-                            <div key={item.label} style={styles.statCard}>
+                            <div key={item.label} className="card" style={{ textAlign: 'center' }}>
                                 <p style={styles.statLabel}>{item.label}</p>
                                 <p style={{ ...styles.statValue, color: item.color }}>{item.value}</p>
                             </div>
                         ))}
                     </div>
 
-                    <div style={styles.tierStatsBox}>
+                    <div className="card">
                         <h3 style={styles.tierStatsTitle}>Risk Tier Distribution</h3>
                         {Object.entries(stats.tier_summary || {}).map(([tier, count]) => (
                             <div key={tier} style={styles.tierRow}>
@@ -258,7 +260,7 @@ export default function AdminPanel() {
                                 <div style={styles.tierBarTrack}>
                                     <div style={{
                                         ...styles.tierBarFill,
-                                        width: `${(count / stats.total_scored) * 100}%`,
+                                        width: `${stats.total_scored > 0 ? (count / stats.total_scored) * 100 : 0}%`,
                                         background: indicatorColors[tier] || '#1a237e',
                                     }} />
                                 </div>
@@ -288,29 +290,25 @@ const styles = {
     message: { padding: '12px 16px', borderRadius: '8px', marginBottom: '20px', fontSize: '14px' },
     infoBox: { background: '#e8eaf6', borderRadius: '8px', padding: '14px 18px', marginBottom: '24px' },
     infoText: { margin: 0, fontSize: '14px', color: '#3949ab' },
-    loading: { textAlign: 'center', padding: '40px', color: '#666' },
-    ruleGroup: { background: '#fff', borderRadius: '12px', marginBottom: '20px', overflow: 'hidden', boxShadow: '0 2px 8px rgba(0,0,0,0.06)' },
     ruleGroupHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px 20px', background: '#f8f9ff' },
     ruleGroupTitle: { margin: 0, fontSize: '16px', fontWeight: '700', color: '#1a237e' },
     maxPoints: { fontSize: '13px', color: '#666', fontWeight: '600' },
-    table: { width: '100%', borderCollapse: 'collapse' },
+    table: { width: '100%', borderCollapse: 'collapse', minWidth: '500px' },
     tableHead: { background: '#f5f5f5' },
-    th: { padding: '12px 16px', textAlign: 'left', fontSize: '12px', fontWeight: '700', color: '#666', textTransform: 'uppercase', letterSpacing: '0.5px' },
+    th: { padding: '12px 16px', textAlign: 'left', fontSize: '12px', fontWeight: '700', color: '#666', textTransform: 'uppercase', letterSpacing: '0.5px', whiteSpace: 'nowrap' },
     tableRow: { borderTop: '1px solid #f0f0f0' },
-    td: { padding: '12px 16px', fontSize: '14px', color: '#333' },
-    editInput: { padding: '6px 10px', border: '2px solid #1a237e', borderRadius: '6px', fontSize: '14px', width: '80px' },
+    td: { padding: '12px 16px', fontSize: '14px', color: '#333', whiteSpace: 'nowrap' },
+    editInput: { padding: '6px 10px', border: '2px solid #1a237e', borderRadius: '6px', fontSize: '14px', width: '80px', fontFamily: 'inherit' },
     pointsBadge: { background: '#e8eaf6', color: '#1a237e', padding: '4px 10px', borderRadius: '12px', fontSize: '13px', fontWeight: '700' },
     editBtn: { padding: '6px 14px', background: '#fff', border: '2px solid #1a237e', color: '#1a237e', borderRadius: '6px', cursor: 'pointer', fontSize: '13px', fontWeight: '600' },
     saveBtn: { padding: '6px 14px', background: '#2e7d32', border: 'none', color: '#fff', borderRadius: '6px', cursor: 'pointer', fontSize: '13px', fontWeight: '600' },
     cancelBtn: { padding: '6px 14px', background: '#f5f5f5', border: 'none', color: '#666', borderRadius: '6px', cursor: 'pointer', fontSize: '13px' },
-    statsGrid: { display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '16px', marginBottom: '24px' },
-    statCard: { background: '#fff', borderRadius: '12px', padding: '24px', boxShadow: '0 2px 8px rgba(0,0,0,0.06)' },
+    statsGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px', marginBottom: '24px' },
     statLabel: { margin: '0 0 8px 0', fontSize: '13px', color: '#999', textTransform: 'uppercase', letterSpacing: '0.5px' },
     statValue: { margin: 0, fontSize: '32px', fontWeight: '800' },
-    tierStatsBox: { background: '#fff', borderRadius: '12px', padding: '24px', boxShadow: '0 2px 8px rgba(0,0,0,0.06)' },
     tierStatsTitle: { margin: '0 0 20px 0', fontSize: '16px', fontWeight: '700', color: '#333' },
     tierRow: { display: 'flex', alignItems: 'center', gap: '16px', marginBottom: '14px' },
-    tierLabel: { fontSize: '13px', fontWeight: '600', color: '#555', width: '120px' },
+    tierLabel: { fontSize: '13px', fontWeight: '600', color: '#555', width: '120px', flexShrink: 0 },
     tierBarTrack: { flex: 1, height: '10px', background: '#f0f0f0', borderRadius: '5px', overflow: 'hidden' },
     tierBarFill: { height: '100%', borderRadius: '5px', transition: 'width 0.5s' },
     tierCount: { fontSize: '14px', fontWeight: '700', color: '#333', width: '30px', textAlign: 'right' },

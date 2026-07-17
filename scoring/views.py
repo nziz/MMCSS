@@ -25,7 +25,7 @@ from .serializers import (
     ScoreRecordSerializer, ApplicantSerializer,
     BatchSessionSerializer, InstitutionSerializer,
     ScoringRuleSerializer, UserSerializer,
-    UserRegistrationSerializer ,
+    UserRegistrationSerializer
 )
 
 
@@ -52,6 +52,24 @@ class UserProfileView(APIView):
         return Response(serializer.data)
 
 
+# ─── USER REGISTRATION (for admin-created users) ─────────────────────────────
+class UserRegisterView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        if not is_admin(request.user):
+            return Response({'error': 'Admin access required.'}, status=status.HTTP_403_FORBIDDEN)
+
+        serializer = UserRegistrationSerializer(data=request.data)
+        if serializer.is_valid():
+            user = serializer.save()
+            return Response({
+                'message': 'User created successfully.',
+                'user': UserSerializer(user).data
+            }, status=status.HTTP_201_CREATED)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
 # ─── INDIVIDUAL SCORING ───────────────────────────────────────────────────────
 class ScoreIndividualView(APIView):
     permission_classes = [IsAuthenticated]
@@ -64,18 +82,16 @@ class ScoreIndividualView(APIView):
                 status=status.HTTP_403_FORBIDDEN
             )
 
-        # Get form data
         transaction_file = request.FILES.get('transaction_file')
-        applicant_ref    = request.data.get('applicant_ref', '').strip()
-        applicant_name   = request.data.get('applicant_name', '').strip()
-        phone_number     = request.data.get('phone_number', '').strip()
-        account_age      = int(request.data.get('account_age_months', 0))
-        gender           = request.data.get('gender', '')
-        district         = request.data.get('district', '')
-        mobile_operator  = request.data.get('mobile_operator', 'mtn')
-        notes            = request.data.get('notes', '')
+        applicant_ref = request.data.get('applicant_ref', '').strip()
+        applicant_name = request.data.get('applicant_name', '').strip()
+        phone_number = request.data.get('phone_number', '').strip()
+        account_age = int(request.data.get('account_age_months', 0))
+        gender = request.data.get('gender', '')
+        district = request.data.get('district', '')
+        mobile_operator = request.data.get('mobile_operator', 'mtn')
+        notes = request.data.get('notes', '')
 
-        # Validate required fields
         if not transaction_file:
             return Response({'error': 'Transaction file is required.'}, status=status.HTTP_400_BAD_REQUEST)
         if not applicant_ref:
@@ -83,7 +99,6 @@ class ScoreIndividualView(APIView):
         if not applicant_name:
             return Response({'error': 'Applicant name is required.'}, status=status.HTTP_400_BAD_REQUEST)
 
-        # Save file temporarily
         suffix = '.json' if transaction_file.name.endswith('.json') else '.csv'
         with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
             for chunk in transaction_file.chunks():
@@ -91,28 +106,23 @@ class ScoreIndividualView(APIView):
             tmp_path = tmp.name
 
         try:
-            # Extract indicators
             indicators = extract_indicators(tmp_path, account_age)
-
-            # Run scoring engine
             engine = CreditScoringEngine()
             result = engine.compute_score(indicators)
 
-            # Get or create applicant
             applicant, created = Applicant.objects.get_or_create(
                 applicant_ref=applicant_ref,
                 defaults={
-                    'full_name':       applicant_name,
-                    'phone_number':    phone_number,
-                    'gender':          gender,
-                    'district':        district,
+                    'full_name': applicant_name,
+                    'phone_number': phone_number,
+                    'gender': gender,
+                    'district': district,
                     'mobile_operator': mobile_operator,
-                    'institution':     request.user.institution,
-                    'created_by':      request.user,
+                    'institution': request.user.institution,
+                    'created_by': request.user,
                 }
             )
 
-            # Save score record
             score = ScoreRecord.objects.create(
                 applicant=applicant,
                 scored_by=request.user,
@@ -154,7 +164,7 @@ class ScoreBatchView(APIView):
 
         transaction_file = request.FILES.get('transaction_file')
         account_ages_raw = request.data.get('account_ages', '{}')
-        notes            = request.data.get('notes', '')
+        notes = request.data.get('notes', '')
 
         if not transaction_file:
             return Response({'error': 'Transaction file is required.'}, status=status.HTTP_400_BAD_REQUEST)
@@ -171,7 +181,6 @@ class ScoreBatchView(APIView):
                 tmp.write(chunk)
             tmp_path = tmp.name
 
-        # Create batch session
         session_ref = f"BATCH-{uuid.uuid4().hex[:8].upper()}"
         batch = BatchSession.objects.create(
             session_ref=session_ref,
@@ -195,10 +204,10 @@ class ScoreBatchView(APIView):
                     applicant, _ = Applicant.objects.get_or_create(
                         applicant_ref=ref,
                         defaults={
-                            'full_name':    f'Applicant {ref}',
+                            'full_name': f'Applicant {ref}',
                             'phone_number': '',
-                            'institution':  request.user.institution,
-                            'created_by':   request.user,
+                            'institution': request.user.institution,
+                            'created_by': request.user,
                         }
                     )
                     score = ScoreRecord.objects.create(
@@ -220,7 +229,10 @@ class ScoreBatchView(APIView):
                     results.append(ScoreRecordSerializer(score).data)
                     batch.processed_count += 1
                     batch.save()
-                except Exception:
+                except Exception as e:
+                    import traceback
+                    print("BATCH PROCESSING ERROR:", str(e))
+                    print("TRACEBACK:", traceback.format_exc())
                     failed += 1
                     batch.failed_count += 1
                     batch.save()
@@ -244,12 +256,14 @@ class ScoreBatchView(APIView):
             batch.save()
             return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
         except Exception as e:
+            import traceback
+            print("BATCH ERROR:", str(e))
+            print("TRACEBACK:", traceback.format_exc())
             batch.status = 'failed'
             batch.save()
             return Response({'error': f'Batch scoring failed: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
         finally:
             os.unlink(tmp_path)
-
 
 # ─── SCORE HISTORY ────────────────────────────────────────────────────────────
 class ScoreHistoryView(APIView):
@@ -261,11 +275,9 @@ class ScoreHistoryView(APIView):
 
         scores = ScoreRecord.objects.select_related('applicant', 'scored_by')
 
-        # Branch managers see only their institution
         if request.user.role == 'branch_manager':
             scores = scores.filter(applicant__institution=request.user.institution)
 
-        # Search filter
         search = request.query_params.get('search', '')
         if search:
             scores = scores.filter(
@@ -274,12 +286,10 @@ class ScoreHistoryView(APIView):
                 applicant__applicant_ref__icontains=search
             )
 
-        # Risk tier filter
         tier = request.query_params.get('risk_tier', '')
         if tier:
             scores = scores.filter(risk_tier=tier)
 
-        # Mode filter
         mode = request.query_params.get('mode', '')
         if mode:
             scores = scores.filter(scoring_mode=mode)
@@ -412,15 +422,13 @@ class InstitutionListView(APIView):
         institutions = Institution.objects.filter(is_active=True)
         serializer = InstitutionSerializer(institutions, many=True)
         return Response(serializer.data)
-        # ─── OTP VIEWS ────────────────────────────────────────────────────────────────
+
+
+# ─── OTP VIEWS ─────────────────────────────────────────────────────────────────
 from .otp_utils import generate_and_send_otp, verify_otp
 
 
 class RequestOTPView(APIView):
-    """
-    Called after username/password login.
-    Sends OTP to user's email if first login.
-    """
     permission_classes = [AllowAny]
 
     def post(self, request):
@@ -433,7 +441,6 @@ class RequestOTPView(APIView):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        # Authenticate user
         from django.contrib.auth import authenticate
         user = authenticate(username=username, password=password)
 
@@ -449,7 +456,6 @@ class RequestOTPView(APIView):
                 status=status.HTTP_403_FORBIDDEN
             )
 
-        # If first login — require OTP
         if user.is_first_login:
             if not user.email:
                 return Response(
@@ -463,7 +469,6 @@ class RequestOTPView(APIView):
                 'username': username,
             })
 
-        # Not first login — issue JWT directly
         from rest_framework_simplejwt.tokens import RefreshToken
         refresh = RefreshToken.for_user(user)
         return Response({
@@ -475,10 +480,6 @@ class RequestOTPView(APIView):
 
 
 class VerifyOTPView(APIView):
-    """
-    Verifies OTP entered by user.
-    On success issues JWT access token.
-    """
     permission_classes = [AllowAny]
 
     def post(self, request):
@@ -507,7 +508,6 @@ class VerifyOTPView(APIView):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        # Issue JWT token
         from rest_framework_simplejwt.tokens import RefreshToken
         refresh = RefreshToken.for_user(user)
         return Response({
@@ -519,7 +519,6 @@ class VerifyOTPView(APIView):
 
 
 class ResendOTPView(APIView):
-    """Resends a fresh OTP to the user's email."""
     permission_classes = [AllowAny]
 
     def post(self, request):
@@ -542,7 +541,10 @@ class ResendOTPView(APIView):
         otp_obj, email_sent = generate_and_send_otp(user)
         return Response({
             'message': f'New OTP sent to {user.email[:3]}***',
-        })# ─── USER MANAGEMENT ──────────────────────────────────────────────────────────
+        })
+
+
+# ─── USER MANAGEMENT ──────────────────────────────────────────────────────────
 class UserListView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -580,6 +582,7 @@ class UserListView(APIView):
             return Response(UserSerializer(user).data, status=status.HTTP_201_CREATED)
         except Exception as e:
             return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
 
 class UserDetailView(APIView):
     permission_classes = [IsAuthenticated]
@@ -620,7 +623,9 @@ class UserDetailView(APIView):
             return Response({'message': 'User deleted.'}, status=status.HTTP_204_NO_CONTENT)
         except User.DoesNotExist:
             return Response({'error': 'User not found.'}, status=status.HTTP_404_NOT_FOUND)
-            # ─── APPLICANT SELF-REGISTRATION ─────────────────────────────────────────────
+
+
+# ─── APPLICANT SELF-REGISTRATION ─────────────────────────────────────────────
 class ApplicantRegisterView(APIView):
     """
     Public endpoint — applicants can self-register.
@@ -671,9 +676,7 @@ class ApplicantRegisterView(APIView):
             except Institution.DoesNotExist:
                 pass
 
-        # Parse full name into first/last
-        
-            
+        # Get names
         first_name = data.get('first_name', '').strip()
         last_name = data.get('last_name', '').strip()
 
@@ -695,8 +698,7 @@ class ApplicantRegisterView(APIView):
         applicant_ref = f"APL-{data['national_id'][-6:]}-{user.id}"
         applicant = Applicant.objects.create(
             applicant_ref=applicant_ref,
-            first_name=data['first_name'],
-            last_name=data['last_name'],
+            full_name=f"{first_name} {last_name}".strip(),
             phone_number=data['phone_number'],
             gender=data.get('gender', ''),
             district=data.get('district', ''),
@@ -712,16 +714,13 @@ class ApplicantRegisterView(APIView):
         return Response({
             'message': 'Registration successful! Check your email for verification code.',
             'username': user.username,
+            'role': user.role,
             'email_sent': email_sent,
             'requires_verification': True,
         }, status=status.HTTP_201_CREATED)
 
 
 class VerifyRegistrationOTPView(APIView):
-    """
-    Verifies OTP for new applicant registration.
-    Activates account on success.
-    """
     permission_classes = [AllowAny]
 
     def post(self, request):
@@ -750,12 +749,10 @@ class VerifyRegistrationOTPView(APIView):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        # Activate account
         user.is_active = True
         user.is_first_login = False
         user.save()
 
-        # Issue JWT token
         from rest_framework_simplejwt.tokens import RefreshToken
         refresh = RefreshToken.for_user(user)
 
@@ -769,10 +766,6 @@ class VerifyRegistrationOTPView(APIView):
 
 # ─── APPLICANT PORTAL VIEWS ───────────────────────────────────────────────────
 class ApplicantPortalView(APIView):
-    """
-    Applicant's own dashboard — sees ONLY their data.
-    Protected from seeing other applicants' data.
-    """
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
@@ -783,7 +776,6 @@ class ApplicantPortalView(APIView):
             )
 
         try:
-            # Get applicant profile linked to this user
             applicant = Applicant.objects.get(
                 national_id__isnull=False,
                 created_by=request.user
@@ -794,12 +786,10 @@ class ApplicantPortalView(APIView):
                 status=status.HTTP_404_NOT_FOUND
             )
 
-        # Get ONLY this applicant's scores
         scores = ScoreRecord.objects.filter(
             applicant=applicant
         ).order_by('-scored_at')
 
-        # Statistics
         total_scores = scores.count()
         latest_score = scores.first()
         avg_csi = scores.aggregate(avg=Avg('csi_total'))['avg'] or 0
@@ -818,10 +808,6 @@ class ApplicantPortalView(APIView):
 
 
 class ApplicantUploadView(APIView):
-    """
-    Applicant uploads their own transaction file
-    to request a credit score computation.
-    """
     permission_classes = [IsAuthenticated]
     parser_classes = [MultiPartParser, FormParser]
 
@@ -841,7 +827,6 @@ class ApplicantUploadView(APIView):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        # Get applicant profile
         try:
             applicant = Applicant.objects.get(created_by=request.user)
         except Applicant.DoesNotExist:
@@ -891,27 +876,20 @@ class ApplicantUploadView(APIView):
 
 
 class ApplicantProfileUpdateView(APIView):
-    """
-    Applicant can update their own profile and credentials.
-    Cannot see or modify other applicants' data.
-    """
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        """Get own profile."""
         if request.user.role != 'applicant':
             return Response({'error': 'Applicants only.'}, status=status.HTTP_403_FORBIDDEN)
         return Response(UserSerializer(request.user).data)
 
     def put(self, request):
-        """Update own profile."""
         if request.user.role != 'applicant':
             return Response({'error': 'Applicants only.'}, status=status.HTTP_403_FORBIDDEN)
 
         user = request.user
         data = request.data
 
-        # Update allowed fields only
         if data.get('email'):
             if User.objects.filter(email=data['email']).exclude(id=user.id).exists():
                 return Response(
@@ -929,7 +907,6 @@ class ApplicantProfileUpdateView(APIView):
         if data.get('last_name'):
             user.last_name = data['last_name']
 
-        # Password change
         if data.get('new_password'):
             old_password = data.get('old_password', '')
             if not user.check_password(old_password):
@@ -949,7 +926,92 @@ class ApplicantProfileUpdateView(APIView):
             'message': 'Profile updated successfully.',
             'user': UserSerializer(user).data,
         })
-        # ─── APPLICANT SELF REGISTRATION 
+
+
+# ─── APPLICANT LIST (for admin/loan officers) ─────────────────────────────────
+class ApplicantListView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        if not can_view(request.user):
+            return Response({'error': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
+
+        applicants = Applicant.objects.select_related('institution', 'created_by')
+
+        if request.user.role == 'branch_manager':
+            applicants = applicants.filter(institution=request.user.institution)
+
+        search = request.query_params.get('search', '')
+        if search:
+            applicants = applicants.filter(
+                full_name__icontains=search
+            ) | applicants.filter(
+                applicant_ref__icontains=search
+            ) | applicants.filter(
+                phone_number__icontains=search
+            )
+
+        district = request.query_params.get('district', '')
+        if district:
+            applicants = applicants.filter(district__icontains=district)
+
+        operator = request.query_params.get('operator', '')
+        if operator:
+            applicants = applicants.filter(mobile_operator=operator)
+
+        applicants = applicants.order_by('-created_at')[:100]
+        serializer = ApplicantSerializer(applicants, many=True)
+        return Response(serializer.data)
+
+
+# ─── SCORE ANALYTICS ────────────────────────────────────────────────────────────
+class ScoreAnalyticsView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        if not can_view(request.user):
+            return Response({'error': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
+
+        scores = ScoreRecord.objects.all()
+
+        if request.user.role == 'branch_manager':
+            scores = scores.filter(applicant__institution=request.user.institution)
+
+        period = request.query_params.get('period', 'all')
+        from datetime import timedelta
+
+        now = timezone.now()
+        if period == 'week':
+            scores = scores.filter(scored_at__gte=now - timedelta(days=7))
+        elif period == 'month':
+            scores = scores.filter(scored_at__gte=now - timedelta(days=30))
+        elif period == 'year':
+            scores = scores.filter(scored_at__gte=now - timedelta(days=365))
+
+        total = scores.count()
+        avg_csi = scores.aggregate(avg=Avg('csi_total'))['avg'] or 0
+
+        tier_counts = scores.values('risk_tier').annotate(count=Count('risk_tier'))
+        tier_distribution = {item['risk_tier']: item['count'] for item in tier_counts}
+
+        mode_counts = scores.values('scoring_mode').annotate(count=Count('scoring_mode'))
+        mode_distribution = {item['scoring_mode']: item['count'] for item in mode_counts}
+
+        top_scorers = scores.order_by('-csi_total')[:5]
+        top_scorers_data = ScoreRecordSerializer(top_scorers, many=True).data
+
+        recent_scores = scores.order_by('-scored_at')[:10]
+        recent_activity = ScoreRecordSerializer(recent_scores, many=True).data
+
+        return Response({
+            'total_scored': total,
+            'average_csi': round(avg_csi, 1),
+            'tier_distribution': tier_distribution,
+            'mode_distribution': mode_distribution,
+            'top_scorers': top_scorers_data,
+            'recent_activity': recent_activity,
+            'period': period,
+        })
 
 
 # ─── APPLICANT OWN SCORES ─────────────────────────────────────────────────────
@@ -982,124 +1044,3 @@ class ApplicantProfileView(APIView):
             user.set_password(new_password)
         user.save()
         return Response(UserSerializer(user).data)
-    # ─── USER REGISTRATION (for admin-created users) ──────────────────────────────
-class UserRegisterView(APIView):
-    """
-    Admin-only endpoint to register new staff users.
-    """
-    permission_classes = [IsAuthenticated]
-
-    def post(self, request):
-        if not is_admin(request.user):
-            return Response({'error': 'Admin access required.'}, status=status.HTTP_403_FORBIDDEN)
-
-        serializer = UserRegistrationSerializer(data=request.data)
-        if serializer.is_valid():
-            user = serializer.save()
-            return Response({
-                'message': 'User created successfully.',
-                'user': UserSerializer(user).data
-            }, status=status.HTTP_201_CREATED)
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
-
-# ─── APPLICANT LIST (for admin/loan officers) ─────────────────────────────────
-class ApplicantListView(APIView):
-    """
-    List all applicants with filtering and search.
-    """
-    permission_classes = [IsAuthenticated]
-
-    def get(self, request):
-        if not can_view(request.user):
-            return Response({'error': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
-
-        applicants = Applicant.objects.select_related('institution', 'created_by')
-
-        # Branch managers see only their institution
-        if request.user.role == 'branch_manager':
-            applicants = applicants.filter(institution=request.user.institution)
-
-        # Search filter
-        search = request.query_params.get('search', '')
-        if search:
-            applicants = applicants.filter(
-                full_name__icontains=search
-            ) | applicants.filter(
-                applicant_ref__icontains=search
-            ) | applicants.filter(
-                phone_number__icontains=search
-            )
-
-        # District filter
-        district = request.query_params.get('district', '')
-        if district:
-            applicants = applicants.filter(district__icontains=district)
-
-        # Operator filter
-        operator = request.query_params.get('operator', '')
-        if operator:
-            applicants = applicants.filter(mobile_operator=operator)
-
-        applicants = applicants.order_by('-created_at')[:100]
-        serializer = ApplicantSerializer(applicants, many=True)
-        return Response(serializer.data)
-
-
-# ─── SCORE ANALYTICS (detailed analytics endpoint) ────────────────────────────
-class ScoreAnalyticsView(APIView):
-    """
-    Detailed analytics and trends for scoring data.
-    """
-    permission_classes = [IsAuthenticated]
-
-    def get(self, request):
-        if not can_view(request.user):
-            return Response({'error': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
-
-        scores = ScoreRecord.objects.all()
-
-        if request.user.role == 'branch_manager':
-            scores = scores.filter(applicant__institution=request.user.institution)
-
-        # Time-based filtering
-        period = request.query_params.get('period', 'all')  # all, week, month, year
-        from django.utils import timezone
-        from datetime import timedelta
-
-        now = timezone.now()
-        if period == 'week':
-            scores = scores.filter(scored_at__gte=now - timedelta(days=7))
-        elif period == 'month':
-            scores = scores.filter(scored_at__gte=now - timedelta(days=30))
-        elif period == 'year':
-            scores = scores.filter(scored_at__gte=now - timedelta(days=365))
-
-        total = scores.count()
-        avg_csi = scores.aggregate(avg=Avg('csi_total'))['avg'] or 0
-
-        # Tier distribution
-        tier_counts = scores.values('risk_tier').annotate(count=Count('risk_tier'))
-        tier_distribution = {item['risk_tier']: item['count'] for item in tier_counts}
-
-        # Mode distribution
-        mode_counts = scores.values('scoring_mode').annotate(count=Count('scoring_mode'))
-        mode_distribution = {item['scoring_mode']: item['count'] for item in mode_counts}
-
-        # Top scorers
-        top_scorers = scores.order_by('-csi_total')[:5]
-        top_scorers_data = ScoreRecordSerializer(top_scorers, many=True).data
-
-        # Recent activity
-        recent_scores = scores.order_by('-scored_at')[:10]
-        recent_activity = ScoreRecordSerializer(recent_scores, many=True).data
-
-        return Response({
-            'total_scored': total,
-            'average_csi': round(avg_csi, 1),
-            'tier_distribution': tier_distribution,
-            'mode_distribution': mode_distribution,
-            'top_scorers': top_scorers_data,
-            'recent_activity': recent_activity,
-            'period': period,
-        })

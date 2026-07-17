@@ -2,14 +2,11 @@ import React, { useState } from 'react';
 import { scoreBatch } from '../services/api';
 
 const TIER_COLORS = {
-    excellent: '#2e7d32',
-    good: '#558b2f',
-    fair: '#f9a825',
-    poor: '#e65100',
-    very_poor: '#b71c1c',
+    excellent: '#2e7d32', good: '#558b2f',
+    fair: '#f9a825', poor: '#e65100', very_poor: '#b71c1c',
 };
 
-export default function ScoreBatch() {
+export default function ScoreBatch({ addToast }) {
     const [file, setFile] = useState(null);
     const [notes, setNotes] = useState('');
     const [result, setResult] = useState(null);
@@ -18,7 +15,11 @@ export default function ScoreBatch() {
 
     const handleSubmit = async (e) => {
         e.preventDefault();
-        if (!file) { setError('Please select a batch transaction file.'); return; }
+        if (!file) {
+            setError('Please select a batch transaction file.');
+            if (addToast) addToast('Please select a batch transaction file.', 'warning');
+            return;
+        }
         setLoading(true);
         setError('');
         setResult(null);
@@ -31,8 +32,11 @@ export default function ScoreBatch() {
         try {
             const res = await scoreBatch(formData);
             setResult(res.data);
+            if (addToast) addToast(`Batch processed: ${res.data.summary.processed} of ${res.data.summary.total} applicants scored`, 'success');
         } catch (err) {
-            setError(err.response?.data?.error || 'Batch scoring failed. Check your file format.');
+            const msg = err.response?.data?.error || err.response?.data?.detail || 'Batch scoring failed. Check your file format.';
+            setError(msg);
+            if (addToast) addToast(msg, 'error');
         } finally {
             setLoading(false);
         }
@@ -55,23 +59,34 @@ export default function ScoreBatch() {
                 </code>
             </div>
 
-            <form onSubmit={handleSubmit} style={styles.form}>
-                {error && <div style={styles.error}>{error}</div>}
+            <form onSubmit={handleSubmit} style={styles.form} noValidate>
+                {error && (
+                    <div style={styles.error} role="alert">
+                        <span>❌</span> {error}
+                    </div>
+                )}
 
                 <div style={styles.field}>
-                    <label style={styles.label}>Batch Transaction File (CSV) *</label>
+                    <label style={styles.label} htmlFor="batch-file">Batch Transaction File (CSV) *</label>
                     <input
+                        id="batch-file"
                         style={styles.input}
                         type="file"
                         accept=".csv,.json"
-                        onChange={e => setFile(e.target.files[0])}
+                        onChange={e => { setFile(e.target.files[0]); if (error) setError(''); }}
                         required
                     />
+                    {file && (
+                        <p style={{ fontSize: '12px', color: '#2e7d32', marginTop: '6px' }}>
+                            ✅ Selected: {file.name} ({(file.size / 1024).toFixed(1)} KB)
+                        </p>
+                    )}
                 </div>
 
                 <div style={styles.field}>
-                    <label style={styles.label}>Notes</label>
+                    <label style={styles.label} htmlFor="batch-notes">Notes</label>
                     <textarea
+                        id="batch-notes"
                         style={styles.textarea}
                         value={notes}
                         onChange={e => setNotes(e.target.value)}
@@ -84,8 +99,13 @@ export default function ScoreBatch() {
                     style={loading ? styles.buttonDisabled : styles.button}
                     type="submit"
                     disabled={loading}
+                    aria-busy={loading}
                 >
-                    {loading ? 'Processing Batch...' : 'Run Batch Scoring'}
+                    {loading ? (
+                        <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
+                            <span style={styles.spinner} /> Processing Batch...
+                        </span>
+                    ) : 'Run Batch Scoring'}
                 </button>
             </form>
 
@@ -96,23 +116,23 @@ export default function ScoreBatch() {
 
                     {/* Summary */}
                     <div style={styles.summaryCards}>
-                        <div style={styles.summaryCard}>
+                        <div className="card" style={{ textAlign: 'center' }}>
                             <p style={styles.summaryLabel}>Total Applicants</p>
                             <p style={styles.summaryValue}>{result.summary.total}</p>
                         </div>
-                        <div style={styles.summaryCard}>
+                        <div className="card" style={{ textAlign: 'center', borderTop: '4px solid #2e7d32' }}>
                             <p style={styles.summaryLabel}>Processed</p>
                             <p style={{ ...styles.summaryValue, color: '#2e7d32' }}>
                                 {result.summary.processed}
                             </p>
                         </div>
-                        <div style={styles.summaryCard}>
+                        <div className="card" style={{ textAlign: 'center', borderTop: '4px solid #b71c1c' }}>
                             <p style={styles.summaryLabel}>Failed</p>
                             <p style={{ ...styles.summaryValue, color: '#b71c1c' }}>
                                 {result.summary.failed}
                             </p>
                         </div>
-                        <div style={styles.summaryCard}>
+                        <div className="card" style={{ textAlign: 'center' }}>
                             <p style={styles.summaryLabel}>Session Ref</p>
                             <p style={{ ...styles.summaryValue, fontSize: '14px' }}>
                                 {result.batch_session.session_ref}
@@ -121,7 +141,7 @@ export default function ScoreBatch() {
                     </div>
 
                     {/* Results Table */}
-                    <div style={styles.tableWrapper}>
+                    <div className="table-responsive">
                         <table style={styles.table}>
                             <thead>
                                 <tr style={styles.thead}>
@@ -167,31 +187,30 @@ export default function ScoreBatch() {
 }
 
 const styles = {
-    container: { padding: '24px' },
+    container: { padding: '24px', maxWidth: '1200px', margin: '0 auto' },
     heading: { fontSize: '22px', fontWeight: '700', color: '#1a237e', marginBottom: '24px' },
     infoBox: { background: '#e8eaf6', borderRadius: '10px', padding: '20px', marginBottom: '24px' },
     infoTitle: { fontSize: '15px', fontWeight: '700', color: '#1a237e', margin: '0 0 8px 0' },
     infoText: { fontSize: '13px', color: '#333', margin: '0 0 8px 0' },
-    code: { display: 'block', background: '#fff', padding: '10px', borderRadius: '6px', fontSize: '12px', color: '#333' },
+    code: { display: 'block', background: '#fff', padding: '10px', borderRadius: '6px', fontSize: '12px', color: '#333', overflowX: 'auto' },
     form: { background: '#fff', borderRadius: '10px', padding: '24px', boxShadow: '0 2px 8px rgba(0,0,0,0.08)', marginBottom: '24px' },
     field: { display: 'flex', flexDirection: 'column', gap: '6px', marginBottom: '16px' },
     label: { fontSize: '13px', fontWeight: '600', color: '#333' },
-    input: { padding: '10px 14px', borderRadius: '8px', border: '1px solid #ddd', fontSize: '14px' },
-    textarea: { padding: '10px 14px', borderRadius: '8px', border: '1px solid #ddd', fontSize: '14px', resize: 'vertical' },
-    button: { padding: '14px 32px', background: '#1a237e', color: '#fff', border: 'none', borderRadius: '8px', fontSize: '15px', fontWeight: '600', cursor: 'pointer' },
-    buttonDisabled: { padding: '14px 32px', background: '#9e9e9e', color: '#fff', border: 'none', borderRadius: '8px', fontSize: '15px', fontWeight: '600', cursor: 'not-allowed' },
-    error: { background: '#ffebee', color: '#c62828', padding: '12px', borderRadius: '8px', fontSize: '13px', marginBottom: '16px' },
+    input: { padding: '10px 14px', borderRadius: '8px', border: '2px solid #e0e0e0', fontSize: '14px', fontFamily: 'inherit' },
+    textarea: { padding: '10px 14px', borderRadius: '8px', border: '2px solid #e0e0e0', fontSize: '14px', resize: 'vertical', fontFamily: 'inherit' },
+    button: { padding: '14px 32px', background: '#1a237e', color: '#fff', border: 'none', borderRadius: '8px', fontSize: '15px', fontWeight: '600', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' },
+    buttonDisabled: { padding: '14px 32px', background: '#9e9e9e', color: '#fff', border: 'none', borderRadius: '8px', fontSize: '15px', fontWeight: '600', cursor: 'not-allowed', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' },
+    spinner: { width: '16px', height: '16px', border: '2px solid rgba(255,255,255,0.3)', borderTopColor: '#fff', borderRadius: '50%', animation: 'spin 0.8s linear infinite', display: 'inline-block' },
+    error: { background: '#ffebee', color: '#c62828', padding: '12px 16px', borderRadius: '8px', fontSize: '13px', display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px' },
     resultBox: { background: '#fff', borderRadius: '10px', padding: '24px', boxShadow: '0 2px 8px rgba(0,0,0,0.08)' },
     resultTitle: { fontSize: '18px', fontWeight: '700', color: '#1a237e', marginBottom: '16px' },
-    summaryCards: { display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '16px', marginBottom: '24px' },
-    summaryCard: { background: '#f5f5f5', borderRadius: '10px', padding: '16px', textAlign: 'center' },
+    summaryCards: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '16px', marginBottom: '24px' },
     summaryLabel: { fontSize: '12px', color: '#888', margin: '0 0 8px 0' },
     summaryValue: { fontSize: '24px', fontWeight: '800', color: '#1a237e', margin: '0' },
-    tableWrapper: { overflowX: 'auto' },
-    table: { width: '100%', borderCollapse: 'collapse' },
+    table: { width: '100%', borderCollapse: 'collapse', minWidth: '600px' },
     thead: { background: '#1a237e' },
-    th: { padding: '14px 16px', color: '#fff', fontSize: '13px', fontWeight: '600', textAlign: 'left' },
+    th: { padding: '14px 16px', color: '#fff', fontSize: '13px', fontWeight: '600', textAlign: 'left', whiteSpace: 'nowrap' },
     tr: { borderBottom: '1px solid #f0f0f0' },
-    td: { padding: '12px 16px', fontSize: '13px', color: '#333' },
-    badge: { color: '#fff', padding: '4px 10px', borderRadius: '20px', fontSize: '11px', fontWeight: '600' },
+    td: { padding: '12px 16px', fontSize: '13px', color: '#333', whiteSpace: 'nowrap' },
+    badge: { color: '#fff', padding: '4px 10px', borderRadius: '20px', fontSize: '11px', fontWeight: '600', display: 'inline-block' },
 };

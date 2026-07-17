@@ -1,330 +1,272 @@
 import React, { useState, useEffect } from 'react';
-import { getInstitutions } from '../services/api';
+import { getRules, updateRule } from '../services/api';
 
-const API_BASE = process.env.REACT_APP_API_URL || 'http://127.0.0.1:8000/api';
-
-const ROLES = [
-    { value: 'admin', label: 'Administrator' },
-    { value: 'loan_officer', label: 'Loan Officer' },
-    { value: 'branch_manager', label: 'Branch Manager' },
-    { value: 'auditor', label: 'Auditor/Viewer' },
-];
-
-const ROLE_COLORS = {
-    admin: '#1a237e',
-    loan_officer: '#2e7d32',
-    branch_manager: '#e65100',
-    auditor: '#6a1b9a',
+const indicatorColors = {
+    'Transaction Frequency': '#1a237e',
+    'Average Transaction Value': '#1565c0',
+    'Savings Consistency': '#2e7d32',
+    'Bill Payment Regularity': '#f57f17',
+    'Network Diversity': '#6a1b9a',
+    'Account Age': '#00695c',
 };
 
-export default function UserManagement() {
-    const [users, setUsers] = useState([]);
-    const [institutions, setInstitutions] = useState([]);
+export default function AdminPanel({ addToast }) {
+    const [rules, setRules] = useState([]);
     const [loading, setLoading] = useState(true);
-    const [showModal, setShowModal] = useState(false);
-    const [editUser, setEditUser] = useState(null);
-    const [deleteConfirm, setDeleteConfirm] = useState(null);
-    const [error, setError] = useState('');
-    const [success, setSuccess] = useState('');
-    const [form, setForm] = useState({
-        username: '',
-        first_name: '',
-        last_name: '',
-        email: '',
-        phone_number: '',
-        role: 'loan_officer',
-        institution: '',
-        password: '',
-        is_active: true,
-    });
+    const [saving, setSaving] = useState(null);
+    const [message, setMessage] = useState('');
+    const [editingRule, setEditingRule] = useState(null);
+    const [editValues, setEditValues] = useState({});
+    const [activeTab, setActiveTab] = useState('rules');
+    const [stats, setStats] = useState(null);
 
-    const token = localStorage.getItem('access_token');
-    const headers = {
-        'Authorization': `Bearer ${token}`,
-        'Content-Type': 'application/json',
-    };
+    useEffect(() => {
+        fetchRules();
+        fetchStats();
+    }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-    const fetchUsers = async () => {
-        setLoading(true);
+    const fetchRules = async () => {
         try {
-            const res = await fetch(`${API_BASE}/users/`, { headers });
-            const data = await res.json();
-            setUsers(data);
+            const res = await getRules();
+            setRules(res.data);
         } catch (err) {
-            setError('Failed to load users.');
+            const msg = err.response?.data?.detail || 'Failed to load scoring rules.';
+            setMessage(msg);
+            if (addToast) addToast(msg, 'error');
         } finally {
             setLoading(false);
         }
     };
 
-    useEffect(() => {
-        fetchUsers();
-        getInstitutions().then(res => setInstitutions(res.data)).catch(() => {});
-    }, []); // eslint-disable-line react-hooks/exhaustive-deps
+    const fetchStats = async () => {
+        try {
+            // Using the dashboard stats endpoint for now
+            const { getDashboardStats } = await import('../services/api');
+            const res = await getDashboardStats();
+            setStats(res.data);
+        } catch (err) {
+            // Silently fail — stats are secondary
+        }
+    };
 
-    const openCreate = () => {
-        setEditUser(null);
-        setForm({
-            username: '', first_name: '', last_name: '',
-            email: '', phone_number: '', role: 'loan_officer',
-            institution: '', password: '', is_active: true,
+    const startEdit = (rule) => {
+        setEditingRule(rule.id);
+        setEditValues({
+            points_awarded: rule.points_awarded,
+            min_value: rule.min_value,
+            max_value: rule.max_value,
         });
-        setError('');
-        setShowModal(true);
     };
 
-    const openEdit = (user) => {
-        setEditUser(user);
-        setForm({
-            username: user.username,
-            first_name: user.first_name,
-            last_name: user.last_name,
-            email: user.email,
-            phone_number: user.phone_number || '',
-            role: user.role,
-            institution: user.institution || '',
-            password: '',
-            is_active: user.is_active,
-        });
-        setError('');
-        setShowModal(true);
-    };
-
-    const handleSubmit = async () => {
-        setError('');
-        if (!form.username) { setError('Username is required.'); return; }
-        if (!editUser && !form.password) { setError('Password is required for new users.'); return; }
-
-        const body = { ...form };
-        if (!body.password) delete body.password;
-        if (!body.institution) delete body.institution;
-
+    const saveRule = async (ruleId) => {
+        setSaving(ruleId);
+        setMessage('');
         try {
-            const url = editUser
-                ? `${API_BASE}/users/${editUser.id}/`
-                : `${API_BASE}/users/`;
-            const method = editUser ? 'PATCH' : 'POST';
-            const res = await fetch(url, { method, headers, body: JSON.stringify(body) });
-            if (!res.ok) {
-                const data = await res.json();
-                setError(JSON.stringify(data));
-                return;
-            }
-            setSuccess(editUser ? 'User updated successfully!' : 'User created successfully!');
-            setShowModal(false);
-            fetchUsers();
-            setTimeout(() => setSuccess(''), 3000);
+            await updateRule(ruleId, editValues);
+            setMessage('✅ Rule updated successfully!');
+            setEditingRule(null);
+            fetchRules();
+            if (addToast) addToast('Rule updated successfully!', 'success');
         } catch (err) {
-            setError('Operation failed. Please try again.');
+            const msg = err.response?.data?.detail || '❌ Failed to update rule. Admin access required.';
+            setMessage(msg);
+            if (addToast) addToast(msg, 'error');
+        } finally {
+            setSaving(null);
         }
     };
 
-    const handleDelete = async (id) => {
-        try {
-            await fetch(`${API_BASE}/users/${id}/`, { method: 'DELETE', headers });
-            setUsers(users.filter(u => u.id !== id));
-            setDeleteConfirm(null);
-            setSuccess('User deleted successfully!');
-            setTimeout(() => setSuccess(''), 3000);
-        } catch (err) {
-            setError('Delete failed.');
-        }
-    };
-
-    const handleToggleActive = async (user) => {
-        try {
-            await fetch(`${API_BASE}/users/${user.id}/`, {
-                method: 'PATCH',
-                headers,
-                body: JSON.stringify({ is_active: !user.is_active }),
-            });
-            setUsers(users.map(u => u.id === user.id ? { ...u, is_active: !u.is_active } : u));
-        } catch (err) {
-            setError('Failed to update user status.');
-        }
-    };
+    const groupedRules = rules.reduce((acc, rule) => {
+        const key = rule.indicator_display || rule.indicator;
+        if (!acc[key]) acc[key] = [];
+        acc[key].push(rule);
+        return acc;
+    }, {});
 
     return (
         <div style={styles.container}>
-            <div style={styles.topBar}>
-                <h2 style={styles.heading}>👥 User Management</h2>
-                <button style={styles.createBtn} onClick={openCreate}>
-                    + Add New User
-                </button>
+            <h2 style={styles.title}>⚙️ Admin Panel</h2>
+            <p style={styles.subtitle}>Manage scoring rules and view system statistics</p>
+
+            {/* Tabs */}
+            <div style={styles.tabs}>
+                {['rules', 'stats'].map(tab => (
+                    <button
+                        key={tab}
+                        style={activeTab === tab ? styles.tabActive : styles.tab}
+                        onClick={() => setActiveTab(tab)}
+                    >
+                        {tab === 'rules' ? '📋 Scoring Rules' : '📊 System Stats'}
+                    </button>
+                ))}
             </div>
 
-            {success && <div style={styles.success}>{success}</div>}
-            {error && !showModal && <div style={styles.errorBox}>{error}</div>}
-
-            {/* Stats */}
-            <div style={styles.statsRow}>
-                {ROLES.map(role => {
-                    const count = users.filter(u => u.role === role.value).length;
-                    return (
-                        <div key={role.value} style={{ ...styles.statCard, borderTop: `4px solid ${ROLE_COLORS[role.value]}` }}>
-                            <p style={styles.statLabel}>{role.label}</p>
-                            <p style={{ ...styles.statValue, color: ROLE_COLORS[role.value] }}>{count}</p>
-                        </div>
-                    );
-                })}
-                <div style={{ ...styles.statCard, borderTop: '4px solid #333' }}>
-                    <p style={styles.statLabel}>Total Users</p>
-                    <p style={styles.statValue}>{users.length}</p>
-                </div>
-            </div>
-
-            {/* Table */}
-            {loading ? (
-                <div style={styles.loading}>Loading users...</div>
-            ) : users.length === 0 ? (
-                <div style={styles.empty}>No users found.</div>
-            ) : (
-                <div style={styles.tableWrapper}>
-                    <table style={styles.table}>
-                        <thead>
-                            <tr style={styles.thead}>
-                                <th style={styles.th}>Name</th>
-                                <th style={styles.th}>Username</th>
-                                <th style={styles.th}>Email</th>
-                                <th style={styles.th}>Role</th>
-                                <th style={styles.th}>Institution</th>
-                                <th style={styles.th}>Status</th>
-                                <th style={styles.th}>Actions</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {users.map(u => (
-                                <tr key={u.id} style={styles.tr}>
-                                    <td style={styles.td}>{u.first_name} {u.last_name}</td>
-                                    <td style={styles.td}>{u.username}</td>
-                                    <td style={styles.td}>{u.email}</td>
-                                    <td style={styles.td}>
-                                        <span style={{ ...styles.roleBadge, background: ROLE_COLORS[u.role] || '#888' }}>
-                                            {ROLES.find(r => r.value === u.role)?.label || u.role}
-                                        </span>
-                                    </td>
-                                    <td style={styles.td}>{u.institution_name || '—'}</td>
-                                    <td style={styles.td}>
-                                        <span style={{ ...styles.statusBadge, background: u.is_active ? '#2e7d32' : '#b71c1c' }}>
-                                            {u.is_active ? 'Active' : 'Inactive'}
-                                        </span>
-                                    </td>
-                                    <td style={styles.td}>
-                                        <button style={styles.editBtn} onClick={() => openEdit(u)}>✏️ Edit</button>
-                                        <button style={styles.toggleBtn} onClick={() => handleToggleActive(u)}>
-                                            {u.is_active ? '🔒 Deactivate' : '✅ Activate'}
-                                        </button>
-                                        <button style={styles.deleteBtn} onClick={() => setDeleteConfirm(u.id)}>🗑</button>
-                                    </td>
-                                </tr>
-                            ))}
-                        </tbody>
-                    </table>
+            {message && (
+                <div style={{
+                    ...styles.message,
+                    background: message.startsWith('✅') ? '#e8f5e9' : '#ffebee',
+                    color: message.startsWith('✅') ? '#2e7d32' : '#c62828',
+                }}>
+                    {message}
                 </div>
             )}
 
-            {/* Delete Confirmation */}
-            {deleteConfirm && (
-                <div style={styles.overlay}>
-                    <div style={styles.confirmBox}>
-                        <h3 style={{ color: '#b71c1c', marginBottom: '12px' }}>⚠️ Confirm Delete</h3>
-                        <p style={{ marginBottom: '20px', color: '#333' }}>
-                            Are you sure you want to delete this user? This cannot be undone.
+            {/* RULES TAB */}
+            {activeTab === 'rules' && (
+                <div>
+                    <div style={styles.infoBox}>
+                        <p style={styles.infoText}>
+                            ℹ️ These are the active scoring rules loaded into the system.
+                            As administrator, you can update point allocations and thresholds.
+                            Changes take effect immediately on the next scoring computation.
                         </p>
-                        <div style={{ display: 'flex', gap: '12px' }}>
-                            <button style={styles.confirmDeleteBtn} onClick={() => handleDelete(deleteConfirm)}>Yes, Delete</button>
-                            <button style={styles.cancelBtn} onClick={() => setDeleteConfirm(null)}>Cancel</button>
-                        </div>
                     </div>
+
+                    {loading ? (
+                        <div className="card" style={{ padding: '40px', textAlign: 'center' }}>
+                            <div className="skeleton" style={{ width: '60px', height: '60px', borderRadius: '50%', margin: '0 auto 16px' }} />
+                            <div className="skeleton skeleton-text" style={{ width: '200px', margin: '0 auto' }} />
+                        </div>
+                    ) : (
+                        Object.entries(groupedRules).map(([indicator, indicatorRules]) => (
+                            <div key={indicator} className="card" style={{ marginBottom: '20px', padding: '0', overflow: 'hidden' }}>
+                                <div style={{
+                                    ...styles.ruleGroupHeader,
+                                    borderLeft: `5px solid ${indicatorColors[indicator] || '#1a237e'}`,
+                                }}>
+                                    <h3 style={styles.ruleGroupTitle}>{indicator}</h3>
+                                    <span style={styles.maxPoints}>
+                                        Max: {indicatorRules[0]?.max_points} pts
+                                    </span>
+                                </div>
+
+                                <div className="table-responsive">
+                                    <table style={styles.table}>
+                                        <thead>
+                                            <tr style={styles.tableHead}>
+                                                <th style={styles.th}>Condition</th>
+                                                <th style={styles.th}>Min Value</th>
+                                                <th style={styles.th}>Max Value</th>
+                                                <th style={styles.th}>Points</th>
+                                                <th style={styles.th}>Action</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {indicatorRules.map(rule => (
+                                                <tr key={rule.id} style={styles.tableRow}>
+                                                    <td style={styles.td}>{rule.condition_label}</td>
+                                                    <td style={styles.td}>
+                                                        {editingRule === rule.id ? (
+                                                            <input
+                                                                style={styles.editInput}
+                                                                type="number"
+                                                                value={editValues.min_value ?? ''}
+                                                                onChange={e => setEditValues({
+                                                                    ...editValues,
+                                                                    min_value: e.target.value
+                                                                })}
+                                                            />
+                                                        ) : (rule.min_value ?? '—')}
+                                                    </td>
+                                                    <td style={styles.td}>
+                                                        {editingRule === rule.id ? (
+                                                            <input
+                                                                style={styles.editInput}
+                                                                type="number"
+                                                                value={editValues.max_value ?? ''}
+                                                                onChange={e => setEditValues({
+                                                                    ...editValues,
+                                                                    max_value: e.target.value
+                                                                })}
+                                                            />
+                                                        ) : (rule.max_value ?? '—')}
+                                                    </td>
+                                                    <td style={styles.td}>
+                                                        {editingRule === rule.id ? (
+                                                            <input
+                                                                style={{ ...styles.editInput, width: '60px' }}
+                                                                type="number"
+                                                                value={editValues.points_awarded}
+                                                                onChange={e => setEditValues({
+                                                                    ...editValues,
+                                                                    points_awarded: e.target.value
+                                                                })}
+                                                            />
+                                                        ) : (
+                                                            <span style={styles.pointsBadge}>
+                                                                {rule.points_awarded} pts
+                                                            </span>
+                                                        )}
+                                                    </td>
+                                                    <td style={styles.td}>
+                                                        {editingRule === rule.id ? (
+                                                            <div style={{ display: 'flex', gap: '8px' }}>
+                                                                <button
+                                                                    style={styles.saveBtn}
+                                                                    onClick={() => saveRule(rule.id)}
+                                                                    disabled={saving === rule.id}
+                                                                >
+                                                                    {saving === rule.id ? '...' : '✅ Save'}
+                                                                </button>
+                                                                <button
+                                                                    style={styles.cancelBtn}
+                                                                    onClick={() => setEditingRule(null)}
+                                                                >
+                                                                    Cancel
+                                                                </button>
+                                                            </div>
+                                                        ) : (
+                                                            <button
+                                                                style={styles.editBtn}
+                                                                onClick={() => startEdit(rule)}
+                                                            >
+                                                                ✏️ Edit
+                                                            </button>
+                                                        )}
+                                                    </td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        ))
+                    )}
                 </div>
             )}
 
-            {/* Create/Edit Modal */}
-            {showModal && (
-                <div style={styles.overlay} onClick={() => setShowModal(false)}>
-                    <div style={styles.modal} onClick={e => e.stopPropagation()}>
-                        <div style={styles.modalHeader}>
-                            <h3 style={styles.modalTitle}>{editUser ? '✏️ Edit User' : '+ Create New User'}</h3>
-                            <button style={styles.closeBtn} onClick={() => setShowModal(false)}>✕</button>
-                        </div>
+            {/* STATS TAB */}
+            {activeTab === 'stats' && stats && (
+                <div>
+                    <div style={styles.statsGrid}>
+                        {[
+                            { label: 'Total Applicants Scored', value: stats.total_scored, color: '#1a237e' },
+                            { label: 'Average CSI Score', value: `${stats.average_csi}/100`, color: '#2e7d32' },
+                            { label: 'Individual Scorings', value: stats.individual_count, color: '#1565c0' },
+                            { label: 'Batch Sessions', value: stats.batch_count, color: '#6a1b9a' },
+                        ].map(item => (
+                            <div key={item.label} className="card" style={{ textAlign: 'center' }}>
+                                <p style={styles.statLabel}>{item.label}</p>
+                                <p style={{ ...styles.statValue, color: item.color }}>{item.value}</p>
+                            </div>
+                        ))}
+                    </div>
 
-                        {error && <div style={styles.errorBox}>{error}</div>}
-
-                        <div style={styles.formGrid}>
-                            <div style={styles.field}>
-                                <label style={styles.label}>Username *</label>
-                                <input style={styles.input} value={form.username}
-                                    onChange={e => setForm({ ...form, username: e.target.value })}
-                                    placeholder="e.g. john_doe" />
+                    <div className="card">
+                        <h3 style={styles.tierStatsTitle}>Risk Tier Distribution</h3>
+                        {Object.entries(stats.tier_summary || {}).map(([tier, count]) => (
+                            <div key={tier} style={styles.tierRow}>
+                                <span style={styles.tierLabel}>{tier.replace('_', ' ').toUpperCase()}</span>
+                                <div style={styles.tierBarTrack}>
+                                    <div style={{
+                                        ...styles.tierBarFill,
+                                        width: `${stats.total_scored > 0 ? (count / stats.total_scored) * 100 : 0}%`,
+                                        background: indicatorColors[tier] || '#1a237e',
+                                    }} />
+                                </div>
+                                <span style={styles.tierCount}>{count}</span>
                             </div>
-                            <div style={styles.field}>
-                                <label style={styles.label}>Role *</label>
-                                <select style={styles.input} value={form.role}
-                                    onChange={e => setForm({ ...form, role: e.target.value })}>
-                                    {ROLES.map(r => (
-                                        <option key={r.value} value={r.value}>{r.label}</option>
-                                    ))}
-                                </select>
-                            </div>
-                            <div style={styles.field}>
-                                <label style={styles.label}>First Name</label>
-                                <input style={styles.input} value={form.first_name}
-                                    onChange={e => setForm({ ...form, first_name: e.target.value })}
-                                    placeholder="First name" />
-                            </div>
-                            <div style={styles.field}>
-                                <label style={styles.label}>Last Name</label>
-                                <input style={styles.input} value={form.last_name}
-                                    onChange={e => setForm({ ...form, last_name: e.target.value })}
-                                    placeholder="Last name" />
-                            </div>
-                            <div style={styles.field}>
-                                <label style={styles.label}>Email</label>
-                                <input style={styles.input} type="email" value={form.email}
-                                    onChange={e => setForm({ ...form, email: e.target.value })}
-                                    placeholder="email@example.com" />
-                            </div>
-                            <div style={styles.field}>
-                                <label style={styles.label}>Phone Number</label>
-                                <input style={styles.input} value={form.phone_number}
-                                    onChange={e => setForm({ ...form, phone_number: e.target.value })}
-                                    placeholder="e.g. 0788000000" />
-                            </div>
-                            <div style={styles.field}>
-                                <label style={styles.label}>Institution</label>
-                                <select style={styles.input} value={form.institution}
-                                    onChange={e => setForm({ ...form, institution: e.target.value })}>
-                                    <option value="">No Institution</option>
-                                    {institutions.map(i => (
-                                        <option key={i.id} value={i.id}>{i.name}</option>
-                                    ))}
-                                </select>
-                            </div>
-                            <div style={styles.field}>
-                                <label style={styles.label}>{editUser ? 'New Password (leave blank to keep)' : 'Password *'}</label>
-                                <input style={styles.input} type="password" value={form.password}
-                                    onChange={e => setForm({ ...form, password: e.target.value })}
-                                    placeholder="Enter password" />
-                            </div>
-                        </div>
-
-                        <div style={styles.field}>
-                            <label style={styles.label}>
-                                <input type="checkbox" checked={form.is_active}
-                                    onChange={e => setForm({ ...form, is_active: e.target.checked })}
-                                    style={{ marginRight: '8px' }} />
-                                Active (user can login)
-                            </label>
-                        </div>
-
-                        <div style={styles.modalActions}>
-                            <button style={styles.saveBtn} onClick={handleSubmit}>
-                                {editUser ? 'Save Changes' : 'Create User'}
-                            </button>
-                            <button style={styles.cancelBtn} onClick={() => setShowModal(false)}>
-                                Cancel
-                            </button>
-                        </div>
+                        ))}
                     </div>
                 </div>
             )}
@@ -333,41 +275,41 @@ export default function UserManagement() {
 }
 
 const styles = {
-    container: { padding: '24px' },
-    topBar: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' },
-    heading: { fontSize: '22px', fontWeight: '700', color: '#1a237e', margin: 0 },
-    createBtn: { padding: '10px 20px', background: '#1a237e', color: '#fff', border: 'none', borderRadius: '8px', fontSize: '14px', fontWeight: '600', cursor: 'pointer' },
-    success: { background: '#e8f5e9', color: '#2e7d32', padding: '12px', borderRadius: '8px', marginBottom: '16px', fontWeight: '600' },
-    errorBox: { background: '#ffebee', color: '#c62828', padding: '12px', borderRadius: '8px', marginBottom: '16px' },
-    statsRow: { display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '14px', marginBottom: '24px' },
-    statCard: { background: '#fff', borderRadius: '10px', padding: '16px', boxShadow: '0 2px 8px rgba(0,0,0,0.08)', textAlign: 'center' },
-    statLabel: { fontSize: '11px', color: '#888', margin: '0 0 6px 0', textTransform: 'uppercase', fontWeight: '600' },
-    statValue: { fontSize: '28px', fontWeight: '800', color: '#1a237e', margin: 0 },
-    loading: { textAlign: 'center', padding: '40px', color: '#888' },
-    empty: { textAlign: 'center', padding: '40px', color: '#888' },
-    tableWrapper: { background: '#fff', borderRadius: '10px', boxShadow: '0 2px 8px rgba(0,0,0,0.08)', overflowX: 'auto' },
-    table: { width: '100%', borderCollapse: 'collapse' },
-    thead: { background: '#1a237e' },
-    th: { padding: '14px 16px', color: '#fff', fontSize: '13px', fontWeight: '600', textAlign: 'left' },
-    tr: { borderBottom: '1px solid #f0f0f0' },
-    td: { padding: '12px 16px', fontSize: '13px', color: '#333' },
-    roleBadge: { color: '#fff', padding: '4px 10px', borderRadius: '20px', fontSize: '11px', fontWeight: '600' },
-    statusBadge: { color: '#fff', padding: '4px 10px', borderRadius: '20px', fontSize: '11px', fontWeight: '600' },
-    editBtn: { padding: '5px 10px', background: '#1a237e', color: '#fff', border: 'none', borderRadius: '6px', fontSize: '12px', cursor: 'pointer', marginRight: '6px' },
-    toggleBtn: { padding: '5px 10px', background: '#f57f17', color: '#fff', border: 'none', borderRadius: '6px', fontSize: '12px', cursor: 'pointer', marginRight: '6px' },
-    deleteBtn: { padding: '5px 10px', background: '#b71c1c', color: '#fff', border: 'none', borderRadius: '6px', fontSize: '12px', cursor: 'pointer' },
-    overlay: { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 },
-    confirmBox: { background: '#fff', borderRadius: '12px', padding: '32px', width: '90%', maxWidth: '400px', boxShadow: '0 20px 60px rgba(0,0,0,0.3)' },
-    modal: { background: '#fff', borderRadius: '16px', padding: '32px', width: '90%', maxWidth: '620px', maxHeight: '90vh', overflowY: 'auto', boxShadow: '0 20px 60px rgba(0,0,0,0.3)' },
-    modalHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' },
-    modalTitle: { fontSize: '18px', fontWeight: '700', color: '#1a237e', margin: 0 },
-    closeBtn: { background: 'none', border: 'none', fontSize: '20px', cursor: 'pointer', color: '#888' },
-    formGrid: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '16px' },
-    field: { display: 'flex', flexDirection: 'column', gap: '6px', marginBottom: '8px' },
-    label: { fontSize: '13px', fontWeight: '600', color: '#333' },
-    input: { padding: '10px 14px', borderRadius: '8px', border: '1px solid #ddd', fontSize: '14px' },
-    modalActions: { display: 'flex', gap: '12px', marginTop: '20px' },
-    saveBtn: { flex: 1, padding: '12px', background: '#1a237e', color: '#fff', border: 'none', borderRadius: '8px', fontSize: '14px', fontWeight: '600', cursor: 'pointer' },
-    cancelBtn: { flex: 1, padding: '12px', background: '#757575', color: '#fff', border: 'none', borderRadius: '8px', fontSize: '14px', fontWeight: '600', cursor: 'pointer' },
-    confirmDeleteBtn: { flex: 1, padding: '12px', background: '#b71c1c', color: '#fff', border: 'none', borderRadius: '8px', fontSize: '14px', fontWeight: '600', cursor: 'pointer' },
+    container: { padding: '32px', maxWidth: '1000px', margin: '0 auto' },
+    title: { fontSize: '26px', fontWeight: '700', color: '#1a237e', margin: '0 0 8px 0' },
+    subtitle: { color: '#666', margin: '0 0 24px 0', fontSize: '15px' },
+    tabs: { display: 'flex', gap: '12px', marginBottom: '24px' },
+    tab: {
+        padding: '10px 24px', background: '#fff', border: '2px solid #e0e0e0',
+        borderRadius: '8px', cursor: 'pointer', fontSize: '14px', fontWeight: '600', color: '#666',
+    },
+    tabActive: {
+        padding: '10px 24px', background: '#1a237e', border: '2px solid #1a237e',
+        borderRadius: '8px', cursor: 'pointer', fontSize: '14px', fontWeight: '600', color: '#fff',
+    },
+    message: { padding: '12px 16px', borderRadius: '8px', marginBottom: '20px', fontSize: '14px' },
+    infoBox: { background: '#e8eaf6', borderRadius: '8px', padding: '14px 18px', marginBottom: '24px' },
+    infoText: { margin: 0, fontSize: '14px', color: '#3949ab' },
+    ruleGroupHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px 20px', background: '#f8f9ff' },
+    ruleGroupTitle: { margin: 0, fontSize: '16px', fontWeight: '700', color: '#1a237e' },
+    maxPoints: { fontSize: '13px', color: '#666', fontWeight: '600' },
+    table: { width: '100%', borderCollapse: 'collapse', minWidth: '500px' },
+    tableHead: { background: '#f5f5f5' },
+    th: { padding: '12px 16px', textAlign: 'left', fontSize: '12px', fontWeight: '700', color: '#666', textTransform: 'uppercase', letterSpacing: '0.5px', whiteSpace: 'nowrap' },
+    tableRow: { borderTop: '1px solid #f0f0f0' },
+    td: { padding: '12px 16px', fontSize: '14px', color: '#333', whiteSpace: 'nowrap' },
+    editInput: { padding: '6px 10px', border: '2px solid #1a237e', borderRadius: '6px', fontSize: '14px', width: '80px', fontFamily: 'inherit' },
+    pointsBadge: { background: '#e8eaf6', color: '#1a237e', padding: '4px 10px', borderRadius: '12px', fontSize: '13px', fontWeight: '700' },
+    editBtn: { padding: '6px 14px', background: '#fff', border: '2px solid #1a237e', color: '#1a237e', borderRadius: '6px', cursor: 'pointer', fontSize: '13px', fontWeight: '600' },
+    saveBtn: { padding: '6px 14px', background: '#2e7d32', border: 'none', color: '#fff', borderRadius: '6px', cursor: 'pointer', fontSize: '13px', fontWeight: '600' },
+    cancelBtn: { padding: '6px 14px', background: '#f5f5f5', border: 'none', color: '#666', borderRadius: '6px', cursor: 'pointer', fontSize: '13px' },
+    statsGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px', marginBottom: '24px' },
+    statLabel: { margin: '0 0 8px 0', fontSize: '13px', color: '#999', textTransform: 'uppercase', letterSpacing: '0.5px' },
+    statValue: { margin: 0, fontSize: '32px', fontWeight: '800' },
+    tierStatsTitle: { margin: '0 0 20px 0', fontSize: '16px', fontWeight: '700', color: '#333' },
+    tierRow: { display: 'flex', alignItems: 'center', gap: '16px', marginBottom: '14px' },
+    tierLabel: { fontSize: '13px', fontWeight: '600', color: '#555', width: '120px', flexShrink: 0 },
+    tierBarTrack: { flex: 1, height: '10px', background: '#f0f0f0', borderRadius: '5px', overflow: 'hidden' },
+    tierBarFill: { height: '100%', borderRadius: '5px', transition: 'width 0.5s' },
+    tierCount: { fontSize: '14px', fontWeight: '700', color: '#333', width: '30px', textAlign: 'right' },
 };

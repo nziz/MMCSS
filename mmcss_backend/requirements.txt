@@ -1,2 +1,5 @@
-pip freeze > requirements.txt
-python-decouple>=3.8
+django
+djangorestframework
+django-cors-headers
+python-decouple
+djangorestframework-simplejwt

@@ -1,11 +1,17 @@
 import React, { useState } from 'react';
-import axios from 'axios';
+import { getApplicantByRef } from '../services/api';
 
-const API = 'http://127.0.0.1:8000/api';
+const getTierColor = (tier) => ({
+    excellent: '#1b5e20', good: '#2e7d32', fair: '#f57f17',
+    poor: '#e65100', very_poor: '#b71c1c',
+}[tier] || '#666');
 
-const getToken = () => localStorage.getItem('access_token');
+const getTierBg = (tier) => ({
+    excellent: '#e8f5e9', good: '#f1f8e9', fair: '#fff8e1',
+    poor: '#fff3e0', very_poor: '#ffebee',
+}[tier] || '#f5f5f5');
 
-export default function ApplicantHistory() {
+export default function ApplicantHistory({ addToast }) {
     const [searchRef, setSearchRef] = useState('');
     const [applicant, setApplicant] = useState(null);
     const [history, setHistory] = useState([]);
@@ -16,47 +22,27 @@ export default function ApplicantHistory() {
     const searchApplicant = async () => {
         if (!searchRef.trim()) {
             setError('Please enter an applicant reference code.');
+            if (addToast) addToast('Please enter an applicant reference code.', 'warning');
             return;
         }
         setLoading(true);
         setError('');
         setApplicant(null);
         setHistory([]);
+        setSelectedScore(null);
 
         try {
-            const res = await axios.get(
-                `${API}/applicants/${searchRef.trim()}/`,
-                { headers: { Authorization: `Bearer ${getToken()}` } }
-            );
+            const res = await getApplicantByRef(searchRef.trim());
             setApplicant(res.data.applicant);
             setHistory(res.data.score_history);
+            if (addToast) addToast(`Found ${res.data.score_history.length} record(s) for ${res.data.applicant.full_name}`, 'success');
         } catch (err) {
-            setError(err.response?.data?.error || 'Applicant not found.');
+            const msg = err.response?.data?.error || err.response?.data?.detail || 'Applicant not found.';
+            setError(msg);
+            if (addToast) addToast(msg, 'error');
         } finally {
             setLoading(false);
         }
-    };
-
-    const getTierColor = (tier) => {
-        const colors = {
-            excellent: '#1b5e20',
-            good: '#2e7d32',
-            fair: '#f57f17',
-            poor: '#e65100',
-            very_poor: '#b71c1c',
-        };
-        return colors[tier] || '#666';
-    };
-
-    const getTierBg = (tier) => {
-        const colors = {
-            excellent: '#e8f5e9',
-            good: '#f1f8e9',
-            fair: '#fff8e1',
-            poor: '#fff3e0',
-            very_poor: '#ffebee',
-        };
-        return colors[tier] || '#f5f5f5';
     };
 
     return (
@@ -70,23 +56,33 @@ export default function ApplicantHistory() {
                     style={styles.searchInput}
                     placeholder="Enter applicant reference code (e.g. APP001)"
                     value={searchRef}
-                    onChange={e => setSearchRef(e.target.value)}
+                    onChange={e => { setSearchRef(e.target.value); setError(''); }}
                     onKeyDown={e => e.key === 'Enter' && searchApplicant()}
+                    aria-label="Applicant reference code"
                 />
                 <button
                     style={styles.searchBtn}
                     onClick={searchApplicant}
                     disabled={loading}
+                    aria-busy={loading}
                 >
-                    {loading ? 'Searching...' : '🔍 Search'}
+                    {loading ? (
+                        <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <span style={styles.spinner} /> Searching...
+                        </span>
+                    ) : '🔍 Search'}
                 </button>
             </div>
 
-            {error && <div style={styles.error}>{error}</div>}
+            {error && (
+                <div style={styles.error} role="alert">
+                    <span>❌</span> {error}
+                </div>
+            )}
 
             {/* Applicant Profile Card */}
             {applicant && (
-                <div style={styles.profileCard}>
+                <div className="card" style={{ marginBottom: '28px' }}>
                     <div style={styles.profileHeader}>
                         <div style={styles.avatar}>
                             {applicant.full_name?.charAt(0).toUpperCase()}
@@ -97,30 +93,19 @@ export default function ApplicantHistory() {
                         </div>
                     </div>
                     <div style={styles.profileDetails}>
-                        <div style={styles.detailItem}>
-                            <span style={styles.detailLabel}>Phone</span>
-                            <span style={styles.detailValue}>{applicant.phone_number || '—'}</span>
-                        </div>
-                        <div style={styles.detailItem}>
-                            <span style={styles.detailLabel}>Gender</span>
-                            <span style={styles.detailValue}>{applicant.gender || '—'}</span>
-                        </div>
-                        <div style={styles.detailItem}>
-                            <span style={styles.detailLabel}>District</span>
-                            <span style={styles.detailValue}>{applicant.district || '—'}</span>
-                        </div>
-                        <div style={styles.detailItem}>
-                            <span style={styles.detailLabel}>Mobile Operator</span>
-                            <span style={styles.detailValue}>{applicant.mobile_operator?.toUpperCase() || '—'}</span>
-                        </div>
-                        <div style={styles.detailItem}>
-                            <span style={styles.detailLabel}>Institution</span>
-                            <span style={styles.detailValue}>{applicant.institution_name || '—'}</span>
-                        </div>
-                        <div style={styles.detailItem}>
-                            <span style={styles.detailLabel}>Total Scorings</span>
-                            <span style={styles.detailValue}>{history.length}</span>
-                        </div>
+                        {[
+                            { label: 'Phone', value: applicant.phone_number },
+                            { label: 'Gender', value: applicant.gender },
+                            { label: 'District', value: applicant.district },
+                            { label: 'Mobile Operator', value: applicant.mobile_operator?.toUpperCase() },
+                            { label: 'Institution', value: applicant.institution_name },
+                            { label: 'Total Scorings', value: history.length },
+                        ].map(item => (
+                            <div key={item.label} style={styles.detailItem}>
+                                <span style={styles.detailLabel}>{item.label}</span>
+                                <span style={styles.detailValue}>{item.value || '—'}</span>
+                            </div>
+                        ))}
                     </div>
                 </div>
             )}
@@ -131,7 +116,7 @@ export default function ApplicantHistory() {
                     <h3 style={styles.historyTitle}>
                         Scoring History ({history.length} record{history.length > 1 ? 's' : ''})
                     </h3>
-                    {history.map((score, index) => (
+                    {history.map((score) => (
                         <div
                             key={score.id}
                             style={{
@@ -202,8 +187,7 @@ export default function ApplicantHistory() {
                                         </div>
                                     ))}
                                     <p style={styles.scoredBy}>
-                                        Scored by: {score.scored_by_name} •
-                                        {score.observation_months} months data
+                                        Scored by: {score.scored_by_name} • {score.observation_months} months data
                                     </p>
                                 </div>
                             )}
@@ -217,8 +201,10 @@ export default function ApplicantHistory() {
             )}
 
             {applicant && history.length === 0 && (
-                <div style={styles.noHistory}>
-                    No scoring history found for this applicant.
+                <div className="empty-state card">
+                    <div className="empty-state-icon">📭</div>
+                    <h3 className="empty-state-title">No scoring history</h3>
+                    <p className="empty-state-text">This applicant hasn't been scored yet.</p>
                 </div>
             )}
         </div>
@@ -233,20 +219,20 @@ const styles = {
     searchInput: {
         flex: 1, padding: '12px 16px', fontSize: '15px',
         border: '2px solid #e0e0e0', borderRadius: '8px',
-        outline: 'none', fontFamily: 'Segoe UI, sans-serif',
+        outline: 'none', fontFamily: 'inherit',
     },
     searchBtn: {
         padding: '12px 24px', background: '#1a237e', color: '#fff',
         border: 'none', borderRadius: '8px', fontSize: '15px',
-        cursor: 'pointer', fontWeight: '600',
+        cursor: 'pointer', fontWeight: '600', display: 'flex', alignItems: 'center', gap: '6px',
+    },
+    spinner: {
+        width: '14px', height: '14px', border: '2px solid rgba(255,255,255,0.3)',
+        borderTopColor: '#fff', borderRadius: '50%', animation: 'spin 0.8s linear infinite', display: 'inline-block',
     },
     error: {
         background: '#ffebee', color: '#c62828', padding: '12px 16px',
-        borderRadius: '8px', marginBottom: '20px', fontSize: '14px',
-    },
-    profileCard: {
-        background: '#fff', borderRadius: '12px', padding: '24px',
-        boxShadow: '0 2px 8px rgba(0,0,0,0.08)', marginBottom: '28px',
+        borderRadius: '8px', marginBottom: '20px', fontSize: '14px', display: 'flex', alignItems: 'center', gap: '8px',
     },
     profileHeader: { display: 'flex', alignItems: 'center', gap: '16px', marginBottom: '20px' },
     avatar: {
@@ -256,7 +242,7 @@ const styles = {
     },
     profileName: { margin: '0 0 4px 0', fontSize: '20px', fontWeight: '700', color: '#1a237e' },
     profileRef: { margin: 0, color: '#666', fontSize: '14px' },
-    profileDetails: { display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '16px' },
+    profileDetails: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '16px' },
     detailItem: { display: 'flex', flexDirection: 'column', gap: '4px' },
     detailLabel: { fontSize: '11px', color: '#999', textTransform: 'uppercase', letterSpacing: '0.5px' },
     detailValue: { fontSize: '14px', color: '#333', fontWeight: '600' },
@@ -267,7 +253,7 @@ const styles = {
         cursor: 'pointer', transition: 'box-shadow 0.2s',
         boxShadow: '0 1px 4px rgba(0,0,0,0.06)',
     },
-    historyCardHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' },
+    historyCardHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px', flexWrap: 'wrap', gap: '8px' },
     tierBadge: {
         color: '#fff', padding: '4px 12px', borderRadius: '20px',
         fontSize: '12px', fontWeight: '700', marginRight: '12px',
@@ -291,8 +277,4 @@ const styles = {
     barScore: { fontSize: '13px', fontWeight: '600', color: '#333', width: '40px', textAlign: 'right' },
     scoredBy: { fontSize: '12px', color: '#999', marginTop: '12px' },
     clickHint: { fontSize: '12px', color: '#999', marginTop: '8px', textAlign: 'center' },
-    noHistory: {
-        background: '#fff', borderRadius: '10px', padding: '32px',
-        textAlign: 'center', color: '#666', fontSize: '15px',
-    },
 };

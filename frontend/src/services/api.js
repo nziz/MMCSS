@@ -1,83 +1,127 @@
-i
-    import axios from 'axios';
+// api.js — Clean API service layer using the centralized config
+import { apiClient } from './apiConfig';
 
-const API = axios.create({
-    baseURL: process.env.REACT_APP_API_URL || 'http://127.0.0.1:8000/api',
-});
+// ── Auth ──────────────────────────────────────────────────────────────
+export const loginUser = async (username, password) => {
+    const response = await apiClient.post('/auth/otp/request/', { username, password });
+    return response.data;
+};
 
-// Automatically attach token to every request
-API.interceptors.request.use((config) => {
-    const token = localStorage.getItem('access_token');
-    if (token) {
-        config.headers.Authorization = `Bearer ${token}`;
-    }
-    return config;
-});
+export const refreshToken = async (refresh) => {
+    const response = await apiClient.post('/auth/refresh/', { refresh });
+    return response.data;
+};
 
-// Auth
-export const login = (username, password) =>
-    API.post('/auth/login/', { username, password });
+// ── Institutions ──────────────────────────────────────────────────────
+export const getInstitutions = async () => {
+    const response = await apiClient.get('/institutions/');
+    return response;
+};
 
-export const requestOTP = (username, password) =>
-    API.post('/auth/request-otp/', { username, password });
+// ── Applicant (Public Auth) ──────────────────────────────────────────
+export const registerApplicant = async (formData) => {
+    const response = await apiClient.post('/auth/register/', formData);
+    return response;
+};
 
-export const verifyOTP = (username, otp_code) =>
-    API.post('/auth/verify-otp/', { username, otp_code });
+export const verifyApplicantOtp = async (username, otpCode) => {
+    const response = await apiClient.post('/auth/otp/verify/', { username, otp_code: otpCode });
+    return response;
+};
 
-export const resendOTP = (username) =>
-    API.post('/auth/resend-otp/', { username });
+export const resendOtpToken = async (username) => {
+    const response = await apiClient.post('/auth/otp/resend/', { username });
+    return response;
+};
 
-export const getProfile = () =>
-    API.get('/auth/profile/');
+export const resendOtp = async (username) => {
+    const response = await apiClient.post('/auth/otp/resend/', { username });
+    return response;
+};
 
-// Scoring
-export const scoreIndividual = (formData) =>
-    API.post('/score/individual/', formData);
+// ── Dashboard ─────────────────────────────────────────────────────────
+export const getDashboardStats = async () => {
+    const response = await apiClient.get('/scores/analytics/');
+    return response;
+};
 
-export const scoreBatch = (formData) =>
-    API.post('/score/batch/', formData);
+export const getScores = async (params = {}) => {
+    const query = new URLSearchParams(params).toString();
+    const response = await apiClient.get(`/scores/history/?${query}`);
+    return response;
+};
 
-// Records
-export const getScores = (params) =>
-    API.get('/scores/', { params });
+export const getScoreDetail = async (id) => {
+    const response = await apiClient.get(`/scores/${id}/`);
+    return response;
+};
 
-export const getScoreDetail = (id) =>
-    API.get(`/scores/${id}/`);
+// ── Scoring ───────────────────────────────────────────────────────────
+export const scoreIndividual = async (formData) => {
+    const response = await apiClient.post('/score/individual/', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+    });
+    return response;
+};
 
-export const getApplicantHistory = (ref) =>
-    API.get(`/applicants/${ref}/`);
+export const scoreBatch = async (formData) => {
+    const response = await apiClient.post('/score/batch/', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+    });
+    return response;
+};
 
-// Dashboard
-export const getDashboardStats = () =>
-    API.get('/dashboard/stats/');
+// ── Admin ───────────────────────────────────────────────────────────
+export const getRules = async () => {
+    const response = await apiClient.get('/rules/');
+    return response;
+};
 
-// Admin
-export const getRules = () =>
-    API.get('/rules/');
+export const updateRule = async (id, data) => {
+    const response = await apiClient.put(`/rules/${id}/`, data);
+    return response;
+};
 
-export const updateRule = (id, data) =>
-    API.put(`/rules/${id}/`, data);
+export const getUsers = async () => {
+    const response = await apiClient.get('/users/');
+    return response;
+};
 
-export const getBatches = () =>
-    API.get('/batches/');
+export const createUser = async (data) => {
+    const response = await apiClient.post('/users/', data);
+    return response;
+};
 
-export const getInstitutions = () =>
-    API.get('/institutions/');
+export const updateUser = async (id, data) => {
+    const response = await apiClient.patch(`/users/${id}/`, data);
+    return response;
+};
 
-// Applicant
-export const registerApplicant = (data) =>
-    API.post('/auth/register/', data);
+export const deleteUser = async (id) => {
+    const response = await apiClient.delete(`/users/${id}/`);
+    return response;
+};
 
-export const getMyScores = () =>
-    API.get('/applicant/my-scores/');
+// ── Applicant Portal ─────────────────────────────────────────────────
+export const getApplicantPortal = async () => {
+    const response = await apiClient.get('/applicant/portal/');
+    return response;
+};
 
-export const updateMyProfile = (data) =>
-    API.patch('/applicant/my-profile/', data);
+export const uploadApplicantFile = async (formData) => {
+    const response = await apiClient.post('/applicant/upload/', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+    });
+    return response;
+};
 
-export const getApplicantPortal = () =>
-    API.get('/applicant/portal/');
+export const updateApplicantProfile = async (data) => {
+    const response = await apiClient.put('/applicant/profile/', data);
+    return response;
+};
 
-export const applicantUpload = (formData) =>
-    API.post('/applicant/upload/', formData);
-
-export default API;
+// ── Applicant Lookup ──────────────────────────────────────────────────
+export const getApplicantByRef = async (ref) => {
+    const response = await apiClient.get(`/applicants/${ref}/`);
+    return response;
+};

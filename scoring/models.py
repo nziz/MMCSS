@@ -8,10 +8,6 @@ from datetime import timedelta
 
 # ─── USER MODEL ───────────────────────────────────────────────────────────────
 class User(AbstractUser):
-    """
-    Custom user model extending Django's AbstractUser.
-    Adds role-based access control for the four system roles.
-    """
     ROLE_CHOICES = [
         ('admin', 'Administrator'),
         ('loan_officer', 'Loan Officer'),
@@ -58,9 +54,6 @@ class User(AbstractUser):
 
 # ─── INSTITUTION MODEL ────────────────────────────────────────────────────────
 class Institution(models.Model):
-    """
-    Represents an MFI or SACCO institution using the system.
-    """
     INSTITUTION_TYPES = [
         ('mfi', 'Microfinance Institution'),
         ('sacco', 'SACCO'),
@@ -75,7 +68,7 @@ class Institution(models.Model):
         default='sacco'
     )
     district = models.CharField(max_length=100)
-    bnr_license_no = models.CharField(  # <-- FIXED: was bnr_license_number
+    bnr_license_no = models.CharField(
         max_length=100,
         blank=True,
         null=True
@@ -94,9 +87,6 @@ class Institution(models.Model):
 
 # ─── APPLICANT MODEL ──────────────────────────────────────────────────────────
 class Applicant(models.Model):
-    """
-    Represents a loan applicant whose mobile money data is being scored.
-    """
     GENDER_CHOICES = [
         ('M', 'Male'),
         ('F', 'Female'),
@@ -152,10 +142,6 @@ class Applicant(models.Model):
 
 # ─── SCORING RULE MODEL ───────────────────────────────────────────────────────
 class ScoringRule(models.Model):
-    """
-    Configurable scoring rules stored in database.
-    Admin can update rules without touching code.
-    """
     INDICATOR_CHOICES = [
         ('txn_frequency', 'Transaction Frequency'),
         ('avg_txn_value', 'Average Transaction Value'),
@@ -200,10 +186,6 @@ class ScoringRule(models.Model):
 
 # ─── SCORE RECORD MODEL ───────────────────────────────────────────────────────
 class ScoreRecord(models.Model):
-    """
-    Stores the credit score result for each applicant scoring session.
-    Supports both individual and batch scoring.
-    """
     RISK_TIER_CHOICES = [
         ('excellent', 'Excellent'),
         ('good', 'Good'),
@@ -283,10 +265,6 @@ class ScoreRecord(models.Model):
 
 # ─── BATCH SESSION MODEL ──────────────────────────────────────────────────────
 class BatchSession(models.Model):
-    """
-    Represents a group/batch scoring session.
-    Links multiple ScoreRecords scored together.
-    """
     STATUS_CHOICES = [
         ('processing', 'Processing'),
         ('completed', 'Completed'),
@@ -327,10 +305,6 @@ class BatchSession(models.Model):
 
 # ─── OTP MODEL ────────────────────────────────────────────────────────────────
 class OTPVerification(models.Model):
-    """
-    Stores OTP codes for first-time login verification.
-    OTP expires after 10 minutes.
-    """
     STATUS_CHOICES = [
         ('pending', 'Pending'),
         ('verified', 'Verified'),

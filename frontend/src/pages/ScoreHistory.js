@@ -17,17 +17,16 @@ const TIER_EXPLANATIONS = {
     very_poor: 'Very poor mobile money behaviour. Extremely low transaction activity and no savings history indicate very high credit risk.',
 };
 
-
 const INDICATOR_LIST = [
-    { key: 'txn_frequency_score',     label: 'Transaction Frequency',   max: 25 },
-    { key: 'avg_txn_value_score',     label: 'Avg Transaction Value',   max: 20 },
-    { key: 'savings_score',           label: 'Savings Consistency',     max: 20 },
-    { key: 'bill_payment_score',      label: 'Bill Payment Regularity', max: 15 },
-    { key: 'network_diversity_score', label: 'Network Diversity',       max: 10 },
-    { key: 'account_age_score',       label: 'Account Age',             max: 10 },
+    { key: 'txn_frequency_score', label: 'Transaction Frequency', max: 25 },
+    { key: 'avg_txn_value_score', label: 'Avg Transaction Value', max: 20 },
+    { key: 'savings_score', label: 'Savings Consistency', max: 20 },
+    { key: 'bill_payment_score', label: 'Bill Payment Regularity', max: 15 },
+    { key: 'network_diversity_score', label: 'Network Diversity', max: 10 },
+    { key: 'account_age_score', label: 'Account Age', max: 10 },
 ];
 
-export default function ScoreHistory() {
+export default function ScoreHistory({ addToast }) {
     const [scores, setScores] = useState([]);
     const [loading, setLoading] = useState(true);
     const [search, setSearch] = useState('');
@@ -41,17 +40,21 @@ export default function ScoreHistory() {
     const [editMode, setEditMode] = useState(false);
     const [editNotes, setEditNotes] = useState('');
 
-    const fetchScores = () => {
+    const fetchScores = async () => {
         setLoading(true);
-        getScores({ search, risk_tier: tierFilter, mode: modeFilter })
-            .then(res => setScores(res.data))
-            .catch(err => console.error(err))
-            .finally(() => setLoading(false));
+        try {
+            const res = await getScores({ search, risk_tier: tierFilter, mode: modeFilter });
+            setScores(res.data);
+        } catch (err) {
+            const msg = err.response?.data?.detail || 'Failed to load score history.';
+            if (addToast) addToast(msg, 'error');
+        } finally {
+            setLoading(false);
+        }
     };
 
     useEffect(() => { fetchScores(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-    // ── Sorting ───────────────────────────────────────────────────────────────
     const sorted = [...scores].sort((a, b) => {
         let aVal = a[sortField];
         let bVal = b[sortField];
@@ -66,7 +69,6 @@ export default function ScoreHistory() {
         else { setSortField(field); setSortDir('desc'); }
     };
 
-    // ── Open Detail ───────────────────────────────────────────────────────────
     const openDetail = async (id) => {
         try {
             const res = await getScoreDetail(id);
@@ -74,10 +76,11 @@ export default function ScoreHistory() {
             setEditNotes(res.data.notes || '');
             setEditMode(false);
             setShowModal(true);
-        } catch (err) { console.error(err); }
+        } catch (err) {
+            if (addToast) addToast('Failed to load score details.', 'error');
+        }
     };
 
-    // ── Delete ────────────────────────────────────────────────────────────────
     const handleDelete = async (id) => {
         try {
             const token = localStorage.getItem('access_token');
@@ -88,10 +91,12 @@ export default function ScoreHistory() {
             setScores(scores.filter(s => s.id !== id));
             setDeleteConfirm(null);
             setShowModal(false);
-        } catch (err) { alert('Delete failed. You may not have permission.'); }
+            if (addToast) addToast('Record deleted successfully.', 'success');
+        } catch (err) {
+            if (addToast) addToast('Delete failed. You may not have permission.', 'error');
+        }
     };
 
-    // ── Update Notes ──────────────────────────────────────────────────────────
     const handleUpdateNotes = async () => {
         try {
             const token = localStorage.getItem('access_token');
@@ -106,11 +111,12 @@ export default function ScoreHistory() {
             setSelectedScore({ ...selectedScore, notes: editNotes });
             setScores(scores.map(s => s.id === selectedScore.id ? { ...s, notes: editNotes } : s));
             setEditMode(false);
-            alert('Notes updated successfully!');
-        } catch (err) { alert('Update failed.'); }
+            if (addToast) addToast('Notes updated successfully!', 'success');
+        } catch (err) {
+            if (addToast) addToast('Update failed.', 'error');
+        }
     };
 
-    // ── Generate PDF ──────────────────────────────────────────────────────────
     const generatePDF = (s) => {
         const doc = new jsPDF();
         const pw = doc.internal.pageSize.getWidth();
@@ -189,7 +195,6 @@ export default function ScoreHistory() {
         doc.save(`MMCSS_Report_${s.applicant_ref}_${Date.now()}.pdf`);
     };
 
-    // ── Generate Word ─────────────────────────────────────────────────────────
     const generateWord = async (s) => {
         const doc = new Document({
             sections: [{
@@ -236,7 +241,8 @@ export default function ScoreHistory() {
             {/* Filters */}
             <div style={styles.filters}>
                 <input style={styles.search} placeholder="Search by name or reference..."
-                    value={search} onChange={e => setSearch(e.target.value)} />
+                    value={search} onChange={e => setSearch(e.target.value)}
+                    onKeyDown={e => e.key === 'Enter' && fetchScores()} />
                 <select style={styles.select} value={tierFilter} onChange={e => setTierFilter(e.target.value)}>
                     <option value="">All Tiers</option>
                     <option value="excellent">Excellent</option>
@@ -275,11 +281,18 @@ export default function ScoreHistory() {
 
             {/* Table */}
             {loading ? (
-                <div style={styles.loading}>Loading...</div>
+                <div className="card" style={{ padding: '40px', textAlign: 'center', color: '#888' }}>
+                    <div className="skeleton" style={{ width: '60px', height: '60px', borderRadius: '50%', margin: '0 auto 16px' }} />
+                    <div className="skeleton skeleton-text" style={{ width: '200px', margin: '0 auto' }} />
+                </div>
             ) : sorted.length === 0 ? (
-                <div style={styles.empty}>No records found.</div>
+                <div className="empty-state card">
+                    <div className="empty-state-icon">📭</div>
+                    <h3 className="empty-state-title">No records found</h3>
+                    <p className="empty-state-text">Try adjusting your filters or score some applicants first.</p>
+                </div>
             ) : (
-                <div style={styles.tableWrapper}>
+                <div className="table-responsive" style={{ background: '#fff', borderRadius: '10px', boxShadow: '0 2px 8px rgba(0,0,0,0.08)' }}>
                     <table style={styles.table}>
                         <thead>
                             <tr style={styles.thead}>
@@ -346,7 +359,6 @@ export default function ScoreHistory() {
             {showModal && selectedScore && (
                 <div style={styles.overlay} onClick={() => setShowModal(false)}>
                     <div style={styles.modal} onClick={e => e.stopPropagation()}>
-
                         <div style={styles.modalHeader}>
                             <h3 style={styles.modalTitle}>Score Record Detail</h3>
                             <button style={styles.closeBtn} onClick={() => setShowModal(false)}>✕</button>
@@ -420,12 +432,8 @@ export default function ScoreHistory() {
                         </div>
 
                         <div style={styles.downloadRow}>
-                            <button style={styles.pdfBtn} onClick={() => generatePDF(selectedScore)}>
-                                📄 PDF Report
-                            </button>
-                            <button style={styles.wordBtn} onClick={() => generateWord(selectedScore)}>
-                                📝 Word Report
-                            </button>
+                            <button style={styles.pdfBtn} onClick={() => generatePDF(selectedScore)}>📄 PDF Report</button>
+                            <button style={styles.wordBtn} onClick={() => generateWord(selectedScore)}>📝 Word Report</button>
                         </div>
 
                         <div style={styles.actionRow}>
@@ -443,32 +451,29 @@ export default function ScoreHistory() {
 }
 
 const styles = {
-    container: { padding: '24px' },
+    container: { padding: '24px', maxWidth: '1400px', margin: '0 auto' },
     heading: { fontSize: '22px', fontWeight: '700', color: '#1a237e', marginBottom: '24px' },
     filters: { display: 'flex', gap: '12px', marginBottom: '16px', flexWrap: 'wrap' },
-    search: { flex: 1, minWidth: '200px', padding: '10px 14px', borderRadius: '8px', border: '1px solid #ddd', fontSize: '14px' },
-    select: { padding: '10px 14px', borderRadius: '8px', border: '1px solid #ddd', fontSize: '14px' },
+    search: { flex: 1, minWidth: '200px', padding: '10px 14px', borderRadius: '8px', border: '2px solid #e0e0e0', fontSize: '14px', fontFamily: 'inherit' },
+    select: { padding: '10px 14px', borderRadius: '8px', border: '2px solid #e0e0e0', fontSize: '14px', fontFamily: 'inherit' },
     button: { padding: '10px 24px', background: '#1a237e', color: '#fff', border: 'none', borderRadius: '8px', fontSize: '14px', fontWeight: '600', cursor: 'pointer' },
     resetBtn: { padding: '10px 24px', background: '#757575', color: '#fff', border: 'none', borderRadius: '8px', fontSize: '14px', fontWeight: '600', cursor: 'pointer' },
     statsBar: { display: 'flex', gap: '10px', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', fontSize: '13px' },
     statBadge: { color: '#fff', padding: '4px 10px', borderRadius: '20px', fontSize: '12px', fontWeight: '600' },
-    loading: { textAlign: 'center', padding: '40px', color: '#888' },
-    empty: { textAlign: 'center', padding: '40px', color: '#888' },
-    tableWrapper: { background: '#fff', borderRadius: '10px', boxShadow: '0 2px 8px rgba(0,0,0,0.08)', overflowX: 'auto' },
-    table: { width: '100%', borderCollapse: 'collapse' },
+    table: { width: '100%', borderCollapse: 'collapse', minWidth: '700px' },
     thead: { background: '#1a237e' },
-    th: { padding: '14px 16px', color: '#fff', fontSize: '13px', fontWeight: '600', textAlign: 'left', cursor: 'pointer', userSelect: 'none' },
+    th: { padding: '14px 16px', color: '#fff', fontSize: '13px', fontWeight: '600', textAlign: 'left', cursor: 'pointer', userSelect: 'none', whiteSpace: 'nowrap' },
     tr: { borderBottom: '1px solid #f0f0f0' },
-    td: { padding: '12px 16px', fontSize: '13px', color: '#333' },
-    badge: { color: '#fff', padding: '4px 10px', borderRadius: '20px', fontSize: '11px', fontWeight: '600' },
+    td: { padding: '12px 16px', fontSize: '13px', color: '#333', whiteSpace: 'nowrap' },
+    badge: { color: '#fff', padding: '4px 10px', borderRadius: '20px', fontSize: '11px', fontWeight: '600', display: 'inline-block' },
     viewBtn: { padding: '5px 10px', background: '#1a237e', color: '#fff', border: 'none', borderRadius: '6px', fontSize: '12px', cursor: 'pointer', marginRight: '6px' },
     deleteBtn: { padding: '5px 10px', background: '#b71c1c', color: '#fff', border: 'none', borderRadius: '6px', fontSize: '12px', cursor: 'pointer' },
-    overlay: { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 },
-    confirmBox: { background: '#fff', borderRadius: '12px', padding: '32px', width: '90%', maxWidth: '400px', boxShadow: '0 20px 60px rgba(0,0,0,0.3)' },
-    modal: { background: '#fff', borderRadius: '16px', padding: '32px', width: '90%', maxWidth: '620px', maxHeight: '90vh', overflowY: 'auto', boxShadow: '0 20px 60px rgba(0,0,0,0.3)' },
+    overlay: { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '20px' },
+    confirmBox: { background: '#fff', borderRadius: '12px', padding: '32px', width: '100%', maxWidth: '400px', boxShadow: '0 20px 60px rgba(0,0,0,0.3)' },
+    modal: { background: '#fff', borderRadius: '16px', padding: '32px', width: '100%', maxWidth: '620px', maxHeight: '90vh', overflowY: 'auto', boxShadow: '0 20px 60px rgba(0,0,0,0.3)', animation: 'fadeIn 0.3s ease' },
     modalHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' },
     modalTitle: { fontSize: '20px', fontWeight: '700', color: '#1a237e', margin: 0 },
-    closeBtn: { background: 'none', border: 'none', fontSize: '20px', cursor: 'pointer', color: '#888' },
+    closeBtn: { background: 'none', border: 'none', fontSize: '20px', cursor: 'pointer', color: '#888', padding: '4px' },
     infoGrid: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '16px' },
     infoItem: { background: '#f5f6fa', borderRadius: '8px', padding: '10px' },
     infoLabel: { display: 'block', fontSize: '11px', color: '#888', marginBottom: '4px' },
@@ -492,7 +497,7 @@ const styles = {
     notesHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' },
     editBtn: { padding: '5px 12px', background: '#f5f5f5', border: '1px solid #ddd', borderRadius: '6px', fontSize: '12px', cursor: 'pointer' },
     notesText: { fontSize: '13px', color: '#555', background: '#f9f9f9', padding: '10px', borderRadius: '8px', margin: 0 },
-    notesInput: { width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid #ddd', fontSize: '13px', resize: 'vertical', boxSizing: 'border-box' },
+    notesInput: { width: '100%', padding: '10px', borderRadius: '8px', border: '2px solid #e0e0e0', fontSize: '13px', resize: 'vertical', boxSizing: 'border-box', fontFamily: 'inherit' },
     saveBtn: { marginTop: '8px', padding: '8px 20px', background: '#2e7d32', color: '#fff', border: 'none', borderRadius: '6px', fontSize: '13px', cursor: 'pointer' },
     downloadRow: { display: 'flex', gap: '12px', marginBottom: '12px' },
     pdfBtn: { flex: 1, padding: '10px', background: '#b71c1c', color: '#fff', border: 'none', borderRadius: '8px', fontSize: '13px', fontWeight: '600', cursor: 'pointer' },
