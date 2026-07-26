@@ -51,8 +51,9 @@ App runs at `http://localhost:3000`
 
 ## Screenshots
 ![Dashboard](screenshots/dashboard.png)
-![Loan Form](screenshots/loan_form.png)
+![Login Form](screenshots/login.png)
+
 
 ## Author
-[Your Name] - BBIT Final-Year Student  
-[LinkedIn](your-linkedin-url) | [Email](mailto:your-email)
+NZIZA AIME OCTAVE  
+[LinkedIn](www.linkedin.com/in/ao-nziza) | [Email](nziza1999@gmail.com )
