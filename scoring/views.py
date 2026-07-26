@@ -1044,3 +1044,101 @@ class ApplicantProfileView(APIView):
             user.set_password(new_password)
         user.save()
         return Response(UserSerializer(user).data)
+    
+import random
+import pyotp
+from django.core.cache import cache
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from rest_framework import status
+from django.contrib.auth import get_user_model
+
+User = get_user_model()
+
+
+class RequestPhoneOTPView(APIView):
+    """Request OTP via phone number (console output for testing)"""
+    permission_classes = []  # No auth required
+    
+    def post(self, request):
+        phone_number = request.data.get('phone_number')
+        
+        if not phone_number:
+            return Response({'error': 'Phone number is required'}, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Find user by phone number
+        try:
+            user = User.objects.get(phone_number=phone_number)
+        except User.DoesNotExist:
+            return Response({'error': 'No user found with this phone number'}, status=status.HTTP_404_NOT_FOUND)
+        
+        # Generate 6-digit OTP
+        otp_code = str(random.randint(100000, 999999))
+        
+        # Store in cache for 5 minutes
+        cache_key = f'phone_otp_{phone_number}'
+        cache.set(cache_key, otp_code, timeout=300)
+        
+        # Print to console (for testing)
+        print("=" * 50)
+        print(f"📱 PHONE OTP FOR {user.first_name or user.username}")
+        print(f"📱 Phone: {phone_number}")
+        print(f"📱 OTP Code: {otp_code}")
+        print(f"📱 Expires in: 5 minutes")
+        print("=" * 50)
+        
+        return Response({
+            'message': f'OTP sent to {phone_number}',
+            'note': 'Check Django server console for the OTP code'
+        }, status=status.HTTP_200_OK)
+
+
+class VerifyPhoneOTPView(APIView):
+    """Verify phone OTP and return JWT tokens"""
+    permission_classes = []  # No auth required
+    
+    def post(self, request):
+        phone_number = request.data.get('phone_number')
+        otp_code = request.data.get('otp_code')
+        
+        if not phone_number or not otp_code:
+            return Response({'error': 'Phone number and OTP code are required'}, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Verify from cache
+        cache_key = f'phone_otp_{phone_number}'
+        stored_otp = cache.get(cache_key)
+        
+        if not stored_otp:
+            return Response({'error': 'OTP expired or not found'}, status=status.HTTP_400_BAD_REQUEST)
+        
+        if stored_otp != otp_code:
+            return Response({'error': 'Invalid OTP code'}, status=status.HTTP_400_BAD_REQUEST)
+        
+        # OTP is valid — get user and generate tokens
+        try:
+            user = User.objects.get(phone_number=phone_number)
+        except User.DoesNotExist:
+            return Response({'error': 'User not found'}, status=status.HTTP_404_NOT_FOUND)
+        
+        # Clear OTP from cache
+        cache.delete(cache_key)
+        
+        # Generate JWT tokens
+        from rest_framework_simplejwt.tokens import RefreshToken
+        refresh = RefreshToken.for_user(user)
+        
+        return Response({
+            'message': 'Phone OTP verified successfully',
+            'user': {
+                'id': user.id,
+                'username': user.username,
+                'first_name': user.first_name,
+                'last_name': user.last_name,
+                'phone_number': user.phone_number,
+                'role': user.role,
+            },
+            'tokens': {
+                'access': str(refresh.access_token),
+                'refresh': str(refresh),
+            }
+        }, status=status.HTTP_200_OK)

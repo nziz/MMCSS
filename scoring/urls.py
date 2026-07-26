@@ -1,11 +1,7 @@
-"""
-URL Routes
-Rule-Based Mobile Money Credit Scoring System
-Researcher: Nziza Aime Octave | UOK BBIT 2026
-"""
-from django.contrib import admin
-from django.urls import path, include
 from django.http import JsonResponse
+from django.urls import path
+from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
+from . import views
 
 def api_root(request):
     return JsonResponse({
@@ -30,23 +26,20 @@ def api_root(request):
     })
 
 urlpatterns = [
-    path('admin/', admin.site.urls),
-    path('api/', include('api.urls')),  # Your API routes
-    path('', api_root, name='api_root'),  # Add this to handle root URL
-]
-from django.urls import path
-from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
-from . import views
+    # ── Root API Info ──────────────────────────────────
+    path('', api_root, name='api_root'),
 
-urlpatterns = [
     # ── Authentication ─────────────────────────────────
     path('auth/register/', views.ApplicantRegisterView.as_view(), name='register'),
-    path('auth/login/',   TokenObtainPairView.as_view(),   name='login'),
-    path('auth/refresh/', TokenRefreshView.as_view(),      name='token_refresh'),
+    path('auth/login/', TokenObtainPairView.as_view(), name='login'),
+    path('auth/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
     path('auth/profile/', views.UserProfileView.as_view(), name='profile'),
     path('auth/otp/request/', views.RequestOTPView.as_view(), name='request_otp'),
     path('auth/otp/verify/', views.VerifyOTPView.as_view(), name='verify_otp'),
     path('auth/otp/resend/', views.ResendOTPView.as_view(), name='resend_otp'),
+        # ── Phone OTP (Console/Print for testing) ──────────
+    path('auth/phone/request/', views.RequestPhoneOTPView.as_view(), name='request_phone_otp'),
+    path('auth/phone/verify/', views.VerifyPhoneOTPView.as_view(), name='verify_phone_otp'),
 
     # ── User Management (Admin) ──────────────────────
     path('users/', views.UserListView.as_view(), name='user_list_create'),
@@ -65,11 +58,11 @@ urlpatterns = [
 
     # ── Scoring ────────────────────────────────────────
     path('score/individual/', views.ScoreIndividualView.as_view(), name='score_individual'),
-    path('score/batch/',      views.ScoreBatchView.as_view(),      name='score_batch'),
+    path('score/batch/', views.ScoreBatchView.as_view(), name='score_batch'),
 
     # ── History & Analytics ────────────────────────────
-    path('scores/history/',   views.ScoreHistoryView.as_view(),    name='score_history'),
-    path('scores/analytics/',  views.ScoreAnalyticsView.as_view(),   name='score_analytics'),
+    path('scores/history/', views.ScoreHistoryView.as_view(), name='score_history'),
+    path('scores/analytics/', views.ScoreAnalyticsView.as_view(), name='score_analytics'),
     path('scores/<int:score_id>/', views.ScoreDetailView.as_view(), name='score_detail'),
 
     # ── Batch Sessions ─────────────────────────────────

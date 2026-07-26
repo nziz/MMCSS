@@ -80,7 +80,7 @@ export default function Dashboard({ addToast }) {
     if (loading) {
         return (
             <div style={styles.container}>
-                <h2 style={styles.heading}>📊 Dashboard Overview</h2>
+                <h2 style={styles.heading}> Dashboard Overview</h2>
                 <div style={styles.cards}>
                     {[1,2,3,4,5,6].map(i => <SkeletonCard key={i} />)}
                 </div>

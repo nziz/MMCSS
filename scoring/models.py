@@ -52,6 +52,8 @@ class User(AbstractUser):
         return self.role == 'branch_manager'
 
 
+from django.db import models
+
 # ─── INSTITUTION MODEL ────────────────────────────────────────────────────────
 class Institution(models.Model):
     INSTITUTION_TYPES = [
@@ -68,11 +70,7 @@ class Institution(models.Model):
         default='sacco'
     )
     district = models.CharField(max_length=100)
-    bnr_license_no = models.CharField(
-        max_length=100,
-        blank=True,
-        null=True
-    )
+    bnr_license_no = models.CharField(max_length=100, blank=True, null=True)
     contact_email = models.EmailField(blank=True, null=True)
     contact_phone = models.CharField(max_length=20, blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -83,6 +81,7 @@ class Institution(models.Model):
 
     def __str__(self):
         return f"{self.name} ({self.get_institution_type_display()})"
+
 
 
 # ─── APPLICANT MODEL ──────────────────────────────────────────────────────────
