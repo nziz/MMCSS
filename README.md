@@ -50,10 +50,12 @@ npm start
 App runs at `http://localhost:3000`
 
 ## Screenshots
-![Dashboard](screenshots/dashboard.png)
-![Login Form](screenshots/login.png)
+![Dashboard](screenshots/dashboard.PNG)
+![Loan Form](screenshots/login.PNG)
+![Register](screenshots/register.PNG)
 
 
 ## Author
 NZIZA AIME OCTAVE  
-[LinkedIn](www.linkedin.com/in/ao-nziza) | [Email](nziza1999@gmail.com )
+
+[LinkedIn](https://www.linkedin.com/in/ao-nziza) | [Email](mailto :nziza1999@gmail.com )
